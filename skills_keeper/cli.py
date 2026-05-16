@@ -20,6 +20,12 @@ DEFAULT_DATASTORE = APP_SUPPORT / "datastore"
 PROJECTS_SKILLS = Path.home() / "Documents" / "Projects" / ".agents" / "skills"
 CODEX_SKILLS = Path.home() / ".codex" / "skills"
 SKIP_FILENAMES = {".system-skills-composer.json", ".composer-state.json"}
+LAUNCHD_LABEL = "com.kellyjanderson.skillskeeper"
+PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCHD_LABEL}.plist"
+LOG_DIR = Path.home() / "Library" / "Logs" / "SkillsKeeper"
+ARCHIVED_DIRNAME = "archived"
+REGISTERED_DIRNAME = "registered"
+DEFAULT_SERVICE_PATH = "/Users/k/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 
 class KeeperError(Exception):
@@ -72,6 +78,10 @@ def registered_workspaces(state: dict[str, Any]) -> list[Path]:
 
 def datastore_path(state: dict[str, Any]) -> Path:
     return resolve_path(state.get("datastore") or DEFAULT_DATASTORE)
+
+
+def timestamp() -> str:
+    return time.strftime("%Y%m%d-%H%M%S")
 
 
 def run_git(args: list[str], cwd: Path, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -157,12 +167,25 @@ def ignore_copy_entry(path: Path) -> bool:
     return path.name in SKIP_FILENAMES or path.name in {"__pycache__", ".DS_Store"}
 
 
+def make_owner_writable(path: Path) -> None:
+    for current in [path, *path.rglob("*")]:
+        try:
+            mode = current.stat().st_mode
+            if current.is_dir():
+                current.chmod(mode | 0o700)
+            else:
+                current.chmod(mode | 0o600)
+        except OSError:
+            continue
+
+
 def copy_tree_clean(src: Path, dst: Path) -> None:
     if dst.exists():
         shutil.rmtree(dst)
     def ignore(_dir: str, names: list[str]) -> set[str]:
         return {name for name in names if ignore_copy_entry(Path(name))}
     shutil.copytree(src, dst, ignore=ignore)
+    make_owner_writable(dst)
 
 
 def workspace_key(workspace: Path) -> str:
@@ -173,10 +196,45 @@ def workspace_key(workspace: Path) -> str:
         return slug(str(workspace))
 
 
+def source_archive_path(datastore: Path, active_path: Path, reason: str = "missing") -> Path:
+    relative = active_path.relative_to(datastore / REGISTERED_DIRNAME)
+    return datastore / ARCHIVED_DIRNAME / reason / timestamp() / relative
+
+
+def move_active_skill_to_archive(datastore: Path, active_path: Path, reason: str = "missing") -> Path:
+    if not active_path.exists():
+        raise KeeperError("archive", f"active skill does not exist: {active_path}")
+    archive_path = source_archive_path(datastore, active_path, reason=reason)
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(active_path), str(archive_path))
+    return archive_path
+
+
+def active_skill_dirs(datastore: Path, workspace: Path) -> dict[tuple[str, str], Path]:
+    root = datastore / REGISTERED_DIRNAME / workspace_key(workspace)
+    result: dict[tuple[str, str], Path] = {}
+    if not root.is_dir():
+        return result
+    for manifest in root.glob("*/*/.skillskeeper-source.json"):
+        skill_dir = manifest.parent
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = {}
+        source_kind = str(data.get("source_kind") or skill_dir.parent.name)
+        identity = str(data.get("identity") or skill_dir.name)
+        result[(source_kind, slug(identity))] = skill_dir
+    return result
+
+
 def archive_workspace(datastore: Path, workspace: Path) -> int:
     count = 0
-    root = datastore / "registered" / workspace_key(workspace)
-    for source in discover_skill_sources(workspace):
+    root = datastore / REGISTERED_DIRNAME / workspace_key(workspace)
+    sources = discover_skill_sources(workspace)
+    seen: set[tuple[str, str]] = set()
+    for source in sources:
+        key = (source.source_kind, slug(source.identity))
+        seen.add(key)
         dst = root / source.source_kind / slug(source.identity)
         copy_tree_clean(source.skill_dir, dst)
         manifest = {
@@ -190,7 +248,37 @@ def archive_workspace(datastore: Path, workspace: Path) -> int:
             encoding="utf-8",
         )
         count += 1
+    for key, active_path in active_skill_dirs(datastore, workspace).items():
+        if key not in seen and active_path.exists():
+            move_active_skill_to_archive(datastore, active_path, reason="missing-from-workspace")
     return count
+
+
+def infer_workspaces_from_datastore(datastore: Path) -> list[Path]:
+    roots: dict[Path, None] = {}
+    for manifest in sorted((datastore / REGISTERED_DIRNAME).glob("*/*/*/.skillskeeper-source.json")):
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        workspace = data.get("workspace")
+        if isinstance(workspace, str):
+            path = resolve_path(workspace)
+            if path.is_dir():
+                roots[path] = None
+    return sorted(roots)
+
+
+def merge_registered_workspaces(state: dict[str, Any], workspaces: Iterable[Path]) -> tuple[dict[str, Any], int]:
+    existing = {resolve_path(item["path"]) for item in state.get("workspaces", [])}
+    added = 0
+    for workspace in workspaces:
+        if workspace not in existing:
+            state.setdefault("workspaces", []).append({"path": str(workspace)})
+            existing.add(workspace)
+            added += 1
+    state["workspaces"] = sorted(state.get("workspaces", []), key=lambda item: item["path"])
+    return state, added
 
 
 def sync_all(push: bool = True) -> tuple[int, bool, bool]:
@@ -265,6 +353,26 @@ def command_unregister(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_infer(args: argparse.Namespace) -> int:
+    state = read_state()
+    if args.datastore:
+        state["datastore"] = str(resolve_path(args.datastore))
+    datastore = datastore_path(state)
+    if not datastore.is_dir():
+        raise KeeperError("infer", f"datastore is not a directory: {datastore}")
+    workspaces = infer_workspaces_from_datastore(datastore)
+    state, added = merge_registered_workspaces(state, workspaces)
+    if not args.dry_run:
+        write_state(state)
+    print(f"datastore: {datastore}")
+    print(f"inferred workspaces: {len(workspaces)}")
+    print(f"added: {added}")
+    print(f"written: {str(not args.dry_run).lower()}")
+    for workspace in workspaces:
+        print(workspace)
+    return 0
+
+
 def command_list(_args: argparse.Namespace) -> int:
     state = read_state()
     print(f"state: {STATE_PATH}")
@@ -299,7 +407,9 @@ def command_datastore_init(args: argparse.Namespace) -> int:
 
 def command_sync(args: argparse.Namespace) -> int:
     total, committed, pushed = sync_all(push=not args.no_push)
+    codex_count = copy_projects_skills_to_codex(prefix=args.codex_prefix) if not args.no_codex_sync else 0
     print(f"archived skills: {total}")
+    print(f"codex copied skills: {codex_count}")
     print(f"committed: {str(committed).lower()}")
     print(f"pushed: {str(pushed).lower()}")
     return 0
@@ -309,6 +419,62 @@ def command_codex_sync(args: argparse.Namespace) -> int:
     count = copy_projects_skills_to_codex(prefix=args.prefix)
     print(f"copied skills: {count}")
     print(f"target: {CODEX_SKILLS}")
+    return 0
+
+
+def resolve_active_skill(datastore: Path, workspace: Path, source_kind: str, identity: str) -> Path:
+    path = (
+        datastore
+        / REGISTERED_DIRNAME
+        / workspace_key(workspace)
+        / source_kind
+        / slug(identity)
+    )
+    if not path.exists():
+        raise KeeperError("skill", f"active skill does not exist: {path}")
+    return path
+
+
+def commit_and_maybe_push(datastore: Path, message: str, push: bool) -> tuple[bool, bool]:
+    committed = git_commit_all(datastore, message)
+    pushed = push_if_remote(datastore) if push and committed else False
+    return committed, pushed
+
+
+def command_archive_skill(args: argparse.Namespace) -> int:
+    state = read_state()
+    datastore = datastore_path(state)
+    workspace = resolve_path(args.workspace)
+    active = resolve_active_skill(datastore, workspace, args.source_kind, args.identity)
+    archived = move_active_skill_to_archive(datastore, active, reason="intentional")
+    committed, pushed = commit_and_maybe_push(
+        datastore,
+        f"Archive skill {args.identity} from {workspace_key(workspace)}",
+        push=not args.no_push,
+    )
+    print(f"archived: {archived}")
+    print(f"committed: {str(committed).lower()}")
+    print(f"pushed: {str(pushed).lower()}")
+    return 0
+
+
+def command_delete_current_skill(args: argparse.Namespace) -> int:
+    state = read_state()
+    datastore = datastore_path(state)
+    workspace = resolve_path(args.workspace)
+    active = resolve_active_skill(datastore, workspace, args.source_kind, args.identity)
+    if args.confirm != "delete-current":
+        raise KeeperError("delete-current", "pass --confirm delete-current")
+    shutil.rmtree(active)
+    committed, pushed = commit_and_maybe_push(
+        datastore,
+        f"Remove current skill {args.identity} from {workspace_key(workspace)}",
+        push=not args.no_push,
+    )
+    print(f"removed from current set: {active}")
+    print("history: preserved in git")
+    print(f"committed: {str(committed).lower()}")
+    print(f"pushed: {str(pushed).lower()}")
     return 0
 
 
@@ -323,6 +489,89 @@ def command_status(_args: argparse.Namespace) -> int:
     print(f"projects skills: {PROJECTS_SKILLS}")
     print(f"codex skills: {CODEX_SKILLS}")
     print(f"registered workspaces: {len(registered_workspaces(state))}")
+    return 0
+
+
+def service_program() -> Path:
+    return Path(sys.argv[0]).resolve()
+
+
+def install_launch_agent(args: argparse.Namespace) -> None:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    PLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
+    program = str(service_program())
+    plist = {
+        "Label": LAUNCHD_LABEL,
+        "ProgramArguments": [
+            program,
+            "watch",
+            "--debounce",
+            str(args.debounce),
+        ],
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        "StandardOutPath": str(LOG_DIR / f"{LAUNCHD_LABEL}.out.log"),
+        "StandardErrorPath": str(LOG_DIR / f"{LAUNCHD_LABEL}.err.log"),
+        "EnvironmentVariables": {
+            "PYTHONUNBUFFERED": "1",
+            "PATH": DEFAULT_SERVICE_PATH,
+        },
+    }
+    if args.no_push:
+        plist["ProgramArguments"].append("--no-push")
+    with PLIST_PATH.open("wb") as handle:
+        plistlib.dump(plist, handle)
+
+
+def launchctl(args: list[str], check: bool = False) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["launchctl", *args], text=True, capture_output=True, check=check)
+
+
+def command_install(args: argparse.Namespace) -> int:
+    state = read_state()
+    datastore = datastore_path(state)
+    ensure_git_repo(datastore, remote=args.datastore_remote)
+    if args.datastore_path:
+        state["datastore"] = str(resolve_path(args.datastore_path))
+        datastore = datastore_path(state)
+        ensure_git_repo(datastore, remote=args.datastore_remote)
+    inferred = infer_workspaces_from_datastore(datastore) if datastore.exists() else []
+    state, added = merge_registered_workspaces(state, inferred)
+    write_state(state)
+    install_launch_agent(args)
+    if args.load:
+        launchctl(["bootout", f"gui/{os.getuid()}", str(PLIST_PATH)], check=False)
+        result = launchctl(["bootstrap", f"gui/{os.getuid()}", str(PLIST_PATH)], check=False)
+        if result.returncode != 0:
+            raise KeeperError("launchd", result.stderr.strip() or result.stdout.strip())
+        launchctl(["enable", f"gui/{os.getuid()}/{LAUNCHD_LABEL}"], check=False)
+    print(f"state: {STATE_PATH}")
+    print(f"datastore: {datastore}")
+    print(f"plist: {PLIST_PATH}")
+    print(f"inferred workspaces added: {added}")
+    print(f"loaded: {str(args.load).lower()}")
+    return 0
+
+
+def command_service(args: argparse.Namespace) -> int:
+    if args.service_command == "start":
+        launchctl(["enable", f"gui/{os.getuid()}/{LAUNCHD_LABEL}"], check=False)
+        result = launchctl(["bootstrap", f"gui/{os.getuid()}", str(PLIST_PATH)], check=False)
+        already_loaded = "Bootstrap failed: 5" in result.stderr
+        if result.returncode != 0 and not already_loaded:
+            raise KeeperError("service", result.stderr.strip() or result.stdout.strip())
+        launchctl(["kickstart", "-k", f"gui/{os.getuid()}/{LAUNCHD_LABEL}"], check=False)
+        print(f"started: {LAUNCHD_LABEL}")
+    elif args.service_command == "stop":
+        launchctl(["bootout", f"gui/{os.getuid()}", str(PLIST_PATH)], check=False)
+        launchctl(["disable", f"gui/{os.getuid()}/{LAUNCHD_LABEL}"], check=False)
+        print(f"stopped: {LAUNCHD_LABEL}")
+    elif args.service_command == "status":
+        result = launchctl(["print", f"gui/{os.getuid()}/{LAUNCHD_LABEL}"], check=False)
+        print(result.stdout if result.returncode == 0 else result.stderr, end="")
+        return result.returncode
+    else:
+        raise KeeperError("service", f"unknown command: {args.service_command}")
     return 0
 
 
@@ -351,7 +600,14 @@ def command_watch(args: argparse.Namespace) -> int:
                 return
             self.last_sync = now
             total, committed, pushed = sync_all(push=not args.no_push)
-            print(f"event sync: {total} skills, committed={committed}, pushed={pushed}", flush=True)
+            codex_count = 0
+            if not args.no_codex_sync:
+                codex_count = copy_projects_skills_to_codex(prefix=args.codex_prefix)
+            print(
+                f"event sync: {total} skills, codex={codex_count}, "
+                f"committed={committed}, pushed={pushed}",
+                flush=True,
+            )
 
     observer = Observer()
     handler = Handler()
@@ -380,21 +636,61 @@ def build_parser() -> argparse.ArgumentParser:
     unregister.add_argument("path")
     unregister.set_defaults(func=command_unregister)
 
+    infer = sub.add_parser("infer", help="infer registered workspaces from datastore manifests")
+    infer.add_argument("--datastore")
+    infer.add_argument("--dry-run", action="store_true")
+    infer.set_defaults(func=command_infer)
+
     sub.add_parser("list", help="list registered workspaces").set_defaults(func=command_list)
     sub.add_parser("status", help="show state and datastore status").set_defaults(func=command_status)
 
     sync = sub.add_parser("sync", help="archive registered skills now")
     sync.add_argument("--no-push", action="store_true", help="commit but do not push datastore changes")
+    sync.add_argument("--no-codex-sync", action="store_true", help="do not update ~/.codex/skills")
+    sync.add_argument("--codex-prefix", default="keld")
     sync.set_defaults(func=command_sync)
 
     watch = sub.add_parser("watch", help="watch registered workspaces using filesystem events")
     watch.add_argument("--debounce", type=float, default=1.0)
     watch.add_argument("--no-push", action="store_true", help="commit but do not push datastore changes")
+    watch.add_argument("--no-codex-sync", action="store_true", help="do not update ~/.codex/skills")
+    watch.add_argument("--codex-prefix", default="keld")
     watch.set_defaults(func=command_watch)
 
     codex = sub.add_parser("codex-sync", help="copy Projects-level skills into ~/.codex/skills with a namespace")
     codex.add_argument("--prefix", default="keld")
     codex.set_defaults(func=command_codex_sync)
+
+    archive = sub.add_parser("archive", help="intentionally move an active datastore skill to archive")
+    archive.add_argument("workspace")
+    archive.add_argument("source_kind", choices=["agents-skills", "agents-local"])
+    archive.add_argument("identity")
+    archive.add_argument("--no-push", action="store_true")
+    archive.set_defaults(func=command_archive_skill)
+
+    delete_current = sub.add_parser(
+        "delete-current",
+        help="remove a skill from the current datastore set; git history is preserved",
+    )
+    delete_current.add_argument("workspace")
+    delete_current.add_argument("source_kind", choices=["agents-skills", "agents-local"])
+    delete_current.add_argument("identity")
+    delete_current.add_argument("--confirm", required=True)
+    delete_current.add_argument("--no-push", action="store_true")
+    delete_current.set_defaults(func=command_delete_current_skill)
+
+    install = sub.add_parser("install", help="install SkillsKeeper state and LaunchAgent")
+    install.add_argument("--datastore-path")
+    install.add_argument("--datastore-remote")
+    install.add_argument("--debounce", type=float, default=1.0)
+    install.add_argument("--no-push", action="store_true")
+    install.add_argument("--no-load", action="store_false", dest="load")
+    install.set_defaults(func=command_install, load=True)
+
+    service = sub.add_parser("service", help="manage the LaunchAgent")
+    service_sub = service.add_subparsers(dest="service_command", required=True)
+    for name in ("start", "stop", "status"):
+        service_sub.add_parser(name).set_defaults(func=command_service)
 
     datastore = sub.add_parser("datastore", help="manage the backing git datastore")
     datastore_sub = datastore.add_subparsers(dest="datastore_command", required=True)
