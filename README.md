@@ -22,6 +22,8 @@ skillskeeper codex-sync
 skillskeeper datastore init --remote git@github.com:OWNER/PRIVATE-STORE.git
 skillskeeper install --datastore-path ~/Documents/Projects/skillsKeeper-datastore
 skillskeeper service status
+skillskeeper skill disable specifications-core
+skillskeeper skill disable specifications-core --workspace ~/Documents/Projects/example
 ```
 
 `watch` uses `watchdog`, which registers platform filesystem event handlers such as macOS FSEvents instead of polling.
@@ -55,6 +57,49 @@ skillskeeper delete-current /path/to/workspace agents-skills skill-name --confir
 ```
 
 That command does not rewrite history.
+
+## Enable / Disable
+
+Skill enablement is stored in:
+
+```text
+~/Library/Application Support/SkillsKeeper/state.json
+```
+
+Disable a skill globally:
+
+```sh
+skillskeeper skill disable specifications-core
+```
+
+Disable a skill for one watched workspace only:
+
+```sh
+skillskeeper skill disable specifications-core --workspace ~/Documents/Projects/example
+```
+
+Enable it again with the matching command:
+
+```sh
+skillskeeper skill enable specifications-core
+skillskeeper skill enable specifications-core --workspace ~/Documents/Projects/example
+```
+
+Global disable wins over workspace settings. Disabled skills are not copied into the active datastore tree or Codex mirror. If a disabled skill was already active, it is moved to `archived/disabled/<timestamp>/...` in the datastore and removed from the current Codex mirror.
+
+For watched workspaces, disabled runtime skills are also moved out of:
+
+```text
+.agents/skills/<skill-name>
+```
+
+and into:
+
+```text
+.agents/.skillskeeper-disabled/<timestamp>/<skill-name>
+```
+
+This keeps the current skill set clean without destroying the local copy.
 
 ## Install
 

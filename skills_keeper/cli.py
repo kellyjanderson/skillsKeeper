@@ -54,9 +54,14 @@ def read_state(path: Path = STATE_PATH) -> dict[str, Any]:
             "version": 1,
             "datastore": str(DEFAULT_DATASTORE),
             "workspaces": [],
+            "skill_flags": {"global": {}, "workspaces": {}},
         }
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        state = json.loads(path.read_text(encoding="utf-8"))
+        state.setdefault("skill_flags", {"global": {}, "workspaces": {}})
+        state["skill_flags"].setdefault("global", {})
+        state["skill_flags"].setdefault("workspaces", {})
+        return state
     except (OSError, json.JSONDecodeError) as error:
         raise KeeperError("state-read", f"failed to read {path}: {error}") from error
 
@@ -196,6 +201,59 @@ def workspace_key(workspace: Path) -> str:
         return slug(str(workspace))
 
 
+def skill_identity(value: str) -> str:
+    return slug(value)
+
+
+def skill_enabled(state: dict[str, Any], workspace: Path, identity: str) -> bool:
+    key = skill_identity(identity)
+    flags = state.get("skill_flags", {})
+    global_flags = flags.get("global", {})
+    if global_flags.get(key, {}).get("enabled") is False:
+        return False
+    workspace_flags = flags.get("workspaces", {}).get(str(resolve_path(workspace)), {})
+    if workspace_flags.get(key, {}).get("enabled") is False:
+        return False
+    return True
+
+
+def set_skill_enabled(
+    state: dict[str, Any],
+    identity: str,
+    enabled: bool,
+    workspace: Path | None = None,
+) -> dict[str, Any]:
+    key = skill_identity(identity)
+    flags = state.setdefault("skill_flags", {"global": {}, "workspaces": {}})
+    flags.setdefault("global", {})
+    flags.setdefault("workspaces", {})
+    target: dict[str, Any]
+    if workspace is None:
+        target = flags["global"]
+    else:
+        workspace_key_value = str(resolve_path(workspace))
+        target = flags["workspaces"].setdefault(workspace_key_value, {})
+    target[key] = {"enabled": enabled, "updated_at": timestamp()}
+    return state
+
+
+def disabled_skill_keys(state: dict[str, Any], workspace: Path | None = None) -> set[str]:
+    flags = state.get("skill_flags", {})
+    disabled = {
+        key
+        for key, value in flags.get("global", {}).items()
+        if isinstance(value, dict) and value.get("enabled") is False
+    }
+    if workspace is not None:
+        workspace_flags = flags.get("workspaces", {}).get(str(resolve_path(workspace)), {})
+        disabled.update(
+            key
+            for key, value in workspace_flags.items()
+            if isinstance(value, dict) and value.get("enabled") is False
+        )
+    return disabled
+
+
 def source_archive_path(datastore: Path, active_path: Path, reason: str = "missing") -> Path:
     relative = active_path.relative_to(datastore / REGISTERED_DIRNAME)
     return datastore / ARCHIVED_DIRNAME / reason / timestamp() / relative
@@ -227,13 +285,39 @@ def active_skill_dirs(datastore: Path, workspace: Path) -> dict[tuple[str, str],
     return result
 
 
-def archive_workspace(datastore: Path, workspace: Path) -> int:
+def move_disabled_workspace_skill_dirs(state: dict[str, Any], workspace: Path) -> int:
+    disabled = disabled_skill_keys(state, workspace)
+    if not disabled:
+        return 0
+    moved = 0
+    runtime_root = workspace / ".agents" / "skills"
+    if not runtime_root.is_dir():
+        return 0
+    archive_root = workspace / ".agents" / ".skillskeeper-disabled" / timestamp()
+    for key in sorted(disabled):
+        path = runtime_root / key
+        if not path.exists():
+            continue
+        archive_root.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(path), str(archive_root / key))
+        moved += 1
+    return moved
+
+
+def archive_workspace(datastore: Path, workspace: Path, state: dict[str, Any] | None = None) -> int:
+    state = state or read_state()
     count = 0
     root = datastore / REGISTERED_DIRNAME / workspace_key(workspace)
+    move_disabled_workspace_skill_dirs(state, workspace)
     sources = discover_skill_sources(workspace)
     seen: set[tuple[str, str]] = set()
     for source in sources:
         key = (source.source_kind, slug(source.identity))
+        if not skill_enabled(state, workspace, source.identity):
+            active_path = root / source.source_kind / slug(source.identity)
+            if active_path.exists():
+                move_active_skill_to_archive(datastore, active_path, reason="disabled")
+            continue
         seen.add(key)
         dst = root / source.source_kind / slug(source.identity)
         copy_tree_clean(source.skill_dir, dst)
@@ -249,7 +333,9 @@ def archive_workspace(datastore: Path, workspace: Path) -> int:
         )
         count += 1
     for key, active_path in active_skill_dirs(datastore, workspace).items():
-        if key not in seen and active_path.exists():
+        if key[1] in disabled_skill_keys(state, workspace) and active_path.exists():
+            move_active_skill_to_archive(datastore, active_path, reason="disabled")
+        elif key not in seen and active_path.exists():
             move_active_skill_to_archive(datastore, active_path, reason="missing-from-workspace")
     return count
 
@@ -287,7 +373,7 @@ def sync_all(push: bool = True) -> tuple[int, bool, bool]:
     ensure_git_repo(datastore)
     total = 0
     for workspace in registered_workspaces(state):
-        total += archive_workspace(datastore, workspace)
+        total += archive_workspace(datastore, workspace, state=state)
     committed = git_commit_all(datastore, f"Archive skills snapshot ({total} skills)")
     pushed = push_if_remote(datastore) if push and committed else False
     return total, committed, pushed
@@ -304,14 +390,22 @@ def rewrite_skill_name(text: str, new_name: str) -> str:
     return f"---\nname: {new_name}\n---\n\n{text}"
 
 
-def copy_projects_skills_to_codex(prefix: str = "keld") -> int:
+def copy_projects_skills_to_codex(prefix: str = "keld", state: dict[str, Any] | None = None) -> int:
+    state = state or read_state()
     if not PROJECTS_SKILLS.is_dir():
         raise KeeperError("codex-sync", f"projects skills root does not exist: {PROJECTS_SKILLS}")
     CODEX_SKILLS.mkdir(parents=True, exist_ok=True)
     count = 0
+    disabled = disabled_skill_keys(state, PROJECTS_SKILLS.parent.parent)
+    for key in disabled:
+        disabled_dir = CODEX_SKILLS / f"{prefix}-{key}"
+        if disabled_dir.exists():
+            shutil.rmtree(disabled_dir)
     for skill_file in sorted(PROJECTS_SKILLS.glob("*/SKILL.md")):
         src_dir = skill_file.parent
         source_name = parse_skill_name(skill_file)
+        if not skill_enabled(state, PROJECTS_SKILLS.parent.parent, source_name):
+            continue
         namespaced = f"{prefix}-{source_name}"
         dst_dir = CODEX_SKILLS / namespaced
         copy_tree_clean(src_dir, dst_dir)
@@ -419,6 +513,33 @@ def command_codex_sync(args: argparse.Namespace) -> int:
     count = copy_projects_skills_to_codex(prefix=args.prefix)
     print(f"copied skills: {count}")
     print(f"target: {CODEX_SKILLS}")
+    return 0
+
+
+def command_skill_flag(args: argparse.Namespace) -> int:
+    state = read_state()
+    workspace = resolve_path(args.workspace) if args.workspace else None
+    enabled = args.skill_command == "enable"
+    state = set_skill_enabled(state, args.identity, enabled, workspace=workspace)
+    write_state(state)
+    scope = str(workspace) if workspace else "global"
+    print(f"skill: {skill_identity(args.identity)}")
+    print(f"scope: {scope}")
+    print(f"enabled: {str(enabled).lower()}")
+    return 0
+
+
+def command_skill_list(_args: argparse.Namespace) -> int:
+    state = read_state()
+    flags = state.get("skill_flags", {})
+    print("global:")
+    for key, value in sorted(flags.get("global", {}).items()):
+        print(f"  {key}: enabled={str(value.get('enabled')).lower()}")
+    print("workspaces:")
+    for workspace, entries in sorted(flags.get("workspaces", {}).items()):
+        print(f"  {workspace}:")
+        for key, value in sorted(entries.items()):
+            print(f"    {key}: enabled={str(value.get('enabled')).lower()}")
     return 0
 
 
@@ -660,6 +781,15 @@ def build_parser() -> argparse.ArgumentParser:
     codex = sub.add_parser("codex-sync", help="copy Projects-level skills into ~/.codex/skills with a namespace")
     codex.add_argument("--prefix", default="keld")
     codex.set_defaults(func=command_codex_sync)
+
+    skill = sub.add_parser("skill", help="manage skill enablement flags")
+    skill_sub = skill.add_subparsers(dest="skill_command", required=True)
+    for name in ("enable", "disable"):
+        flag = skill_sub.add_parser(name, help=f"{name} a skill globally or for one workspace")
+        flag.add_argument("identity")
+        flag.add_argument("--workspace", help="workspace path; omit for global")
+        flag.set_defaults(func=command_skill_flag)
+    skill_sub.add_parser("list", help="list skill enablement flags").set_defaults(func=command_skill_list)
 
     archive = sub.add_parser("archive", help="intentionally move an active datastore skill to archive")
     archive.add_argument("workspace")
