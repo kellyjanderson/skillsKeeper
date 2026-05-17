@@ -305,7 +305,7 @@ def move_disabled_workspace_skill_dirs(state: dict[str, Any], workspace: Path) -
 
 
 def archive_workspace(datastore: Path, workspace: Path, state: dict[str, Any] | None = None) -> int:
-    state = state or read_state()
+    state = state or {"version": 1, "skill_flags": {"global": {}, "workspaces": {}}}
     count = 0
     root = datastore / REGISTERED_DIRNAME / workspace_key(workspace)
     move_disabled_workspace_skill_dirs(state, workspace)
