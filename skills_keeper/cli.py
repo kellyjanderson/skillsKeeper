@@ -48,7 +48,8 @@ def slug(value: str) -> str:
     return cleaned or "workspace"
 
 
-def read_state(path: Path = STATE_PATH) -> dict[str, Any]:
+def read_state(path: Path | None = None) -> dict[str, Any]:
+    path = path or STATE_PATH
     if not path.exists():
         return {
             "version": 1,
@@ -66,7 +67,8 @@ def read_state(path: Path = STATE_PATH) -> dict[str, Any]:
         raise KeeperError("state-read", f"failed to read {path}: {error}") from error
 
 
-def write_state(state: dict[str, Any], path: Path = STATE_PATH) -> None:
+def write_state(state: dict[str, Any], path: Path | None = None) -> None:
+    path = path or STATE_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -294,12 +296,27 @@ def move_disabled_workspace_skill_dirs(state: dict[str, Any], workspace: Path) -
     if not runtime_root.is_dir():
         return 0
     archive_root = workspace / ".agents" / ".skillskeeper-disabled" / timestamp()
+    runtime_sources = [
+        source for source in discover_skill_sources(workspace)
+        if source.source_kind == "agents-skills"
+    ]
+    seen_paths: set[Path] = set()
+    for source in sorted(
+        runtime_sources,
+        key=lambda item: (skill_identity(item.identity), item.skill_dir.name),
+    ):
+        if skill_identity(source.identity) not in disabled:
+            continue
+        seen_paths.add(source.skill_dir)
+        archive_root.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source.skill_dir), str(archive_root / source.skill_dir.name))
+        moved += 1
     for key in sorted(disabled):
         path = runtime_root / key
-        if not path.exists():
+        if not path.exists() or path in seen_paths:
             continue
         archive_root.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(path), str(archive_root / key))
+        shutil.move(str(path), str(archive_root / path.name))
         moved += 1
     return moved
 
@@ -418,6 +435,28 @@ def copy_projects_skills_to_codex(prefix: str = "keld", state: dict[str, Any] | 
     return count
 
 
+def reconcile_disabled_skills(
+    state: dict[str, Any],
+    workspace: Path | None = None,
+    codex_prefix: str = "keld",
+    push: bool = True,
+) -> tuple[int, bool, bool, int]:
+    datastore = datastore_path(state)
+    ensure_git_repo(datastore)
+    workspaces = [resolve_path(workspace)] if workspace is not None else registered_workspaces(state)
+    total = 0
+    for registered_workspace in workspaces:
+        total += archive_workspace(datastore, registered_workspace, state=state)
+    committed = git_commit_all(datastore, f"Reconcile disabled skills ({total} active skills)")
+    pushed = push_if_remote(datastore) if push and committed else False
+    codex_count = (
+        copy_projects_skills_to_codex(prefix=codex_prefix, state=state)
+        if PROJECTS_SKILLS.is_dir()
+        else 0
+    )
+    return total, committed, pushed, codex_count
+
+
 def command_register(args: argparse.Namespace) -> int:
     workspace = resolve_path(args.path)
     if not workspace.is_dir():
@@ -522,10 +561,24 @@ def command_skill_flag(args: argparse.Namespace) -> int:
     enabled = args.skill_command == "enable"
     state = set_skill_enabled(state, args.identity, enabled, workspace=workspace)
     write_state(state)
+    reconciled: tuple[int, bool, bool, int] | None = None
+    if not enabled:
+        reconciled = reconcile_disabled_skills(
+            state,
+            workspace=workspace,
+            codex_prefix=args.codex_prefix,
+            push=not args.no_push,
+        )
     scope = str(workspace) if workspace else "global"
     print(f"skill: {skill_identity(args.identity)}")
     print(f"scope: {scope}")
     print(f"enabled: {str(enabled).lower()}")
+    if reconciled is not None:
+        active_count, committed, pushed, codex_count = reconciled
+        print(f"active skills copied: {active_count}")
+        print(f"codex copied skills: {codex_count}")
+        print(f"committed: {str(committed).lower()}")
+        print(f"pushed: {str(pushed).lower()}")
     return 0
 
 
@@ -650,12 +703,10 @@ def launchctl(args: list[str], check: bool = False) -> subprocess.CompletedProce
 
 def command_install(args: argparse.Namespace) -> int:
     state = read_state()
-    datastore = datastore_path(state)
-    ensure_git_repo(datastore, remote=args.datastore_remote)
     if args.datastore_path:
         state["datastore"] = str(resolve_path(args.datastore_path))
-        datastore = datastore_path(state)
-        ensure_git_repo(datastore, remote=args.datastore_remote)
+    datastore = datastore_path(state)
+    ensure_git_repo(datastore, remote=args.datastore_remote)
     inferred = infer_workspaces_from_datastore(datastore) if datastore.exists() else []
     state, added = merge_registered_workspaces(state, inferred)
     write_state(state)
@@ -788,6 +839,8 @@ def build_parser() -> argparse.ArgumentParser:
         flag = skill_sub.add_parser(name, help=f"{name} a skill globally or for one workspace")
         flag.add_argument("identity")
         flag.add_argument("--workspace", help="workspace path; omit for global")
+        flag.add_argument("--no-push", action="store_true", help="commit but do not push datastore cleanup")
+        flag.add_argument("--codex-prefix", default="keld")
         flag.set_defaults(func=command_skill_flag)
     skill_sub.add_parser("list", help="list skill enablement flags").set_defaults(func=command_skill_list)
 

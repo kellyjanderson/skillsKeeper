@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 
 from skills_keeper import cli
 
@@ -13,11 +16,17 @@ class SkillsKeeperTest(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
 
-    def make_skill(self, root: Path, name: str, body: str = "# Skill\n") -> Path:
+    def make_skill(
+        self,
+        root: Path,
+        name: str,
+        body: str = "# Skill\n",
+        metadata_name: str | None = None,
+    ) -> Path:
         skill_dir = root / name
         skill_dir.mkdir(parents=True, exist_ok=True)
         (skill_dir / "SKILL.md").write_text(
-            f"---\nname: {name}\ndescription: Test skill.\n---\n\n{body}",
+            f"---\nname: {metadata_name or name}\ndescription: Test skill.\n---\n\n{body}",
             encoding="utf-8",
         )
         return skill_dir
@@ -149,6 +158,118 @@ class SkillsKeeperTest(unittest.TestCase):
             (workspace / ".agents" / ".skillskeeper-disabled").glob("*/specifications-core/SKILL.md")
         )
         self.assertEqual(len(archived), 1)
+
+    def test_disabled_workspace_skill_dir_matches_frontmatter_identity(self) -> None:
+        workspace = self.root / "app"
+        self.make_skill(
+            workspace / ".agents" / "skills",
+            "folder-name",
+            metadata_name="frontmatter-name",
+        )
+        state = {"version": 1, "skill_flags": {"global": {}, "workspaces": {}}}
+        cli.set_skill_enabled(state, "frontmatter-name", False)
+
+        moved = cli.move_disabled_workspace_skill_dirs(state, workspace)
+
+        self.assertEqual(moved, 1)
+        self.assertFalse((workspace / ".agents" / "skills" / "folder-name").exists())
+        archived = list(
+            (workspace / ".agents" / ".skillskeeper-disabled").glob("*/folder-name/SKILL.md")
+        )
+        self.assertEqual(len(archived), 1)
+
+    def test_skill_disable_command_reconciles_active_copies_immediately(self) -> None:
+        old_paths = (
+            cli.STATE_PATH,
+            cli.DEFAULT_DATASTORE,
+            cli.PROJECTS_SKILLS,
+            cli.CODEX_SKILLS,
+            cli.git_commit_all,
+        )
+        try:
+            workspace = (self.root / "app").resolve()
+            datastore = self.root / "store"
+            projects_root = self.root / "Projects"
+            projects_skills = projects_root / ".agents" / "skills"
+            codex_skills = self.root / "codex-skills"
+            self.make_skill(workspace / ".agents" / "skills", "specifications-core")
+            self.make_skill(projects_skills, "specifications-core")
+            cli.archive_workspace(datastore, workspace)
+            cli.copy_tree_clean(
+                projects_skills / "specifications-core",
+                codex_skills / "keld-specifications-core",
+            )
+            state_path = self.root / "state.json"
+            cli.STATE_PATH = state_path
+            cli.DEFAULT_DATASTORE = datastore
+            cli.PROJECTS_SKILLS = projects_skills
+            cli.CODEX_SKILLS = codex_skills
+            cli.git_commit_all = lambda _path, _message: False
+            cli.write_state(
+                {
+                    "version": 1,
+                    "datastore": str(datastore),
+                    "workspaces": [{"path": str(workspace)}],
+                    "skill_flags": {"global": {}, "workspaces": {}},
+                }
+            )
+
+            with redirect_stdout(StringIO()):
+                result = cli.command_skill_flag(
+                    SimpleNamespace(
+                        workspace=None,
+                        skill_command="disable",
+                        identity="specifications-core",
+                        no_push=True,
+                        codex_prefix="keld",
+                    )
+                )
+
+            self.assertEqual(result, 0)
+            self.assertFalse(
+                datastore.joinpath(
+                    "registered",
+                    cli.workspace_key(workspace),
+                    "agents-skills",
+                    "specifications-core",
+                ).exists()
+            )
+            self.assertFalse((workspace / ".agents" / "skills" / "specifications-core").exists())
+            self.assertFalse((codex_skills / "keld-specifications-core").exists())
+        finally:
+            (
+                cli.STATE_PATH,
+                cli.DEFAULT_DATASTORE,
+                cli.PROJECTS_SKILLS,
+                cli.CODEX_SKILLS,
+                cli.git_commit_all,
+            ) = old_paths
+
+    def test_install_honors_datastore_path_before_initializing_repo(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE, cli.PLIST_PATH, cli.LOG_DIR)
+        try:
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = self.root / "default-store"
+            cli.PLIST_PATH = self.root / "LaunchAgents" / "skillskeeper.plist"
+            cli.LOG_DIR = self.root / "Logs"
+            explicit_store = self.root / "explicit-store"
+
+            with redirect_stdout(StringIO()):
+                result = cli.command_install(
+                    SimpleNamespace(
+                        datastore_path=str(explicit_store),
+                        datastore_remote=None,
+                        debounce=1.0,
+                        no_push=True,
+                        load=False,
+                    )
+                )
+
+            self.assertEqual(result, 0)
+            self.assertFalse((self.root / "default-store" / ".git").exists())
+            self.assertTrue((explicit_store / ".git").exists())
+        finally:
+            cli.STATE_PATH, cli.DEFAULT_DATASTORE, cli.PLIST_PATH, cli.LOG_DIR = old_paths
 
     def test_rewrite_skill_name_replaces_frontmatter_name(self) -> None:
         text = "---\nname: old-name\ndescription: Example.\n---\n\n# Old\n"

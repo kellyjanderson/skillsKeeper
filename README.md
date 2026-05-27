@@ -24,6 +24,7 @@ skillskeeper install --datastore-path ~/Documents/Projects/skillsKeeper-datastor
 skillskeeper service status
 skillskeeper skill disable specifications-core
 skillskeeper skill disable specifications-core --workspace ~/Documents/Projects/example
+skillskeeper skill disable specifications-core --no-push
 ```
 
 `watch` uses `watchdog`, which registers platform filesystem event handlers such as macOS FSEvents instead of polling.
@@ -86,6 +87,8 @@ skillskeeper skill enable specifications-core --workspace ~/Documents/Projects/e
 ```
 
 Global disable wins over workspace settings. Disabled skills are not copied into the active datastore tree or Codex mirror. If a disabled skill was already active, it is moved to `archived/disabled/<timestamp>/...` in the datastore and removed from the current Codex mirror.
+
+Disable commands reconcile active copies immediately. By default, datastore cleanup is committed and pushed when a datastore remote exists; pass `--no-push` to keep the cleanup local.
 
 For watched workspaces, disabled runtime skills are also moved out of:
 
