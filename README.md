@@ -25,6 +25,9 @@ skillskeeper service status
 skillskeeper skill validate /path/to/skill
 skillskeeper skill add /path/to/skill --workspace /path/to/workspace
 skillskeeper skill add /path/to/skill --global
+skillskeeper skill update /path/to/skill --global
+skillskeeper skill directive add skill-name --global --title "Directive title" --body "Directive text"
+skillskeeper skill directive remove skill-name --global --title "Directive title"
 skillskeeper skill disable specifications-core
 skillskeeper skill disable specifications-core --workspace ~/Documents/Projects/example
 skillskeeper skill disable specifications-core --no-push
@@ -91,7 +94,34 @@ and mirrors to:
 ~/.codex/skills/keld-<skill-name>
 ```
 
-Use `--name <skill-name>` to rename the installed skill, and `--replace` to intentionally overwrite an existing target skill. `skill add` runs `sync` after a successful install, so the private datastore and Codex mirror are reconciled immediately.
+Use `--name <skill-name>` to rename the installed skill. `skill add` is create-only and fails if the target skill already exists. Use `skill update` to intentionally replace an existing managed skill.
+
+Update an existing skill from a source directory, validating before and after replacement:
+
+```sh
+skillskeeper skill update /path/to/source-skill --workspace /path/to/workspace
+skillskeeper skill update /path/to/source-skill --global
+```
+
+`skill update` requires the target skill to already exist and runs `sync` after a successful replacement.
+
+Append a titled directive to an existing skill:
+
+```sh
+skillskeeper skill directive add skill-name --global --title "Directive title" --body "Directive text"
+skillskeeper skill directive add skill-name --workspace /path/to/workspace --title "Directive title" --body-file directive.md
+```
+
+Directives are stored in `SKILL.md` under a `SkillsKeeper Directives` section with stable marker comments. Titles must be unique per skill.
+
+Remove a titled directive:
+
+```sh
+skillskeeper skill directive remove skill-name --global --title "Directive title"
+skillskeeper skill directive remove skill-name --workspace /path/to/workspace --title "Directive title"
+```
+
+Directive add/remove validates the skill afterward and runs `sync` so the private datastore and Codex mirror are reconciled immediately.
 
 If a skill was present in the datastore but is no longer present locally, it is moved to:
 

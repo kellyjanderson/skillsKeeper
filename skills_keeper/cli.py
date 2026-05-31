@@ -244,6 +244,19 @@ def format_validation_result(result: SkillValidationResult) -> str:
     return "\n".join(lines)
 
 
+def read_text_arg(value: str | None, file_value: str | None, *, stage: str) -> str:
+    if value is not None and file_value is not None:
+        raise KeeperError(stage, "pass either --body or --body-file, not both")
+    if file_value is not None:
+        try:
+            return resolve_path(file_value).read_text(encoding="utf-8")
+        except OSError as error:
+            raise KeeperError(stage, f"failed to read body file: {error}") from error
+    if value is None:
+        raise KeeperError(stage, "pass --body or --body-file")
+    return value
+
+
 def discover_skill_sources(workspace: Path) -> list[SkillSource]:
     sources: list[SkillSource] = []
     runtime_root = workspace / ".agents" / "skills"
@@ -722,17 +735,63 @@ def ensure_workspace_registered(state: dict[str, Any], workspace: Path) -> bool:
     return True
 
 
+def target_root_for_scope(args: argparse.Namespace, *, state: dict[str, Any]) -> tuple[Path, Path, bool]:
+    if getattr(args, "global_skill", False):
+        return PROJECTS_SKILLS, PROJECTS_SKILLS.parent.parent, False
+    workspace = resolve_path(getattr(args, "workspace", None) or Path.cwd())
+    if not workspace.is_dir():
+        raise KeeperError("skill", f"workspace is not a directory: {workspace}")
+    registered = ensure_workspace_registered(state, workspace) if not getattr(args, "no_register", False) else False
+    return workspace / ".agents" / "skills", workspace, registered
+
+
+def sync_after_skill_change(args: argparse.Namespace) -> tuple[int, int, bool, bool]:
+    archived_total, committed, pushed = sync_all(push=not getattr(args, "no_push", False))
+    codex_count = (
+        0
+        if getattr(args, "no_codex_sync", False)
+        else copy_projects_skills_to_codex(prefix=getattr(args, "codex_prefix", "keld"))
+    )
+    return archived_total, codex_count, committed, pushed
+
+
+def print_sync_summary(archived_total: int, codex_count: int, committed: bool, pushed: bool) -> None:
+    print(f"archived skills: {archived_total}")
+    print(f"codex copied skills: {codex_count}")
+    print(f"committed: {str(committed).lower()}")
+    print(f"pushed: {str(pushed).lower()}")
+
+
+def resolve_existing_skill(target_root: Path, identity: str) -> Path:
+    direct = target_root / skill_identity(identity)
+    if (direct / "SKILL.md").exists():
+        return direct
+    matches = [
+        skill_file.parent
+        for skill_file in sorted(target_root.glob("*/SKILL.md"))
+        if skill_identity(parse_skill_name(skill_file)) == skill_identity(identity)
+    ]
+    if not matches:
+        raise KeeperError("skill", f"target skill does not exist: {target_root / skill_identity(identity)}")
+    if len(matches) > 1:
+        joined = ", ".join(str(path) for path in matches)
+        raise KeeperError("skill", f"multiple target skills match {identity!r}: {joined}")
+    return matches[0]
+
+
 def install_skill_to_root(
     source: Path,
     target_root: Path,
     identity: str,
     *,
-    replace: bool = False,
+    must_exist: bool = False,
     rewrite_name: bool = False,
 ) -> Path:
     target_dir = target_root / skill_identity(identity)
-    if target_dir.exists() and not replace:
-        raise KeeperError("skill-add", f"target skill already exists: {target_dir}; pass --replace")
+    if must_exist:
+        target_dir = resolve_existing_skill(target_root, identity)
+    elif target_dir.exists():
+        raise KeeperError("skill-add", f"target skill already exists: {target_dir}; use `skillskeeper skill update`")
     if source.resolve() == target_dir.resolve():
         raise KeeperError("skill-add", f"source and target are the same directory: {source}")
     target_root.mkdir(parents=True, exist_ok=True)
@@ -746,6 +805,48 @@ def install_skill_to_root(
     return target_dir
 
 
+DIRECTIVE_SECTION = "## SkillsKeeper Directives"
+DIRECTIVE_OPEN = "<!-- skillskeeper-directive:"
+DIRECTIVE_CLOSE = "<!-- /skillskeeper-directive:"
+
+
+def directive_slug(title: str) -> str:
+    return slug(title).lower()
+
+
+def directive_markers(title: str) -> tuple[str, str, str]:
+    key = directive_slug(title)
+    return key, f"{DIRECTIVE_OPEN} {key} -->", f"{DIRECTIVE_CLOSE} {key} -->"
+
+
+def append_directive(skill_dir: Path, title: str, body: str) -> None:
+    skill_file = skill_dir / "SKILL.md"
+    text = skill_file.read_text(encoding="utf-8")
+    key, open_marker, close_marker = directive_markers(title)
+    if open_marker in text:
+        raise KeeperError("directive", f"directive already exists: {key}")
+    directive = f"{open_marker}\n### {title}\n\n{body.strip()}\n{close_marker}\n"
+    if f"\n{DIRECTIVE_SECTION}\n" not in text:
+        text = text.rstrip() + f"\n\n{DIRECTIVE_SECTION}\n\n{directive}"
+    else:
+        text = text.rstrip() + f"\n\n{directive}"
+    skill_file.write_text(text, encoding="utf-8")
+
+
+def remove_directive(skill_dir: Path, title: str) -> None:
+    skill_file = skill_dir / "SKILL.md"
+    text = skill_file.read_text(encoding="utf-8")
+    key, open_marker, close_marker = directive_markers(title)
+    pattern = re.compile(
+        rf"\n*{re.escape(open_marker)}\n.*?\n{re.escape(close_marker)}\n*",
+        re.DOTALL,
+    )
+    updated, count = pattern.subn("\n\n", text, count=1)
+    if count == 0:
+        raise KeeperError("directive", f"directive does not exist: {key}")
+    skill_file.write_text(updated.rstrip() + "\n", encoding="utf-8")
+
+
 def command_skill_add(args: argparse.Namespace) -> int:
     source = resolve_skill_dir(args.source)
     source_result = validate_skill_dir(source)
@@ -756,22 +857,12 @@ def command_skill_add(args: argparse.Namespace) -> int:
     identity = args.name or source_result.name
     rewrite_name = bool(args.name) or skill_identity(identity) != identity
     state = read_state()
-    if args.global_skill:
-        target_root = PROJECTS_SKILLS
-        workspace = PROJECTS_SKILLS.parent.parent
-        registered = False
-    else:
-        workspace = resolve_path(args.workspace or Path.cwd())
-        if not workspace.is_dir():
-            raise KeeperError("skill-add", f"workspace is not a directory: {workspace}")
-        target_root = workspace / ".agents" / "skills"
-        registered = ensure_workspace_registered(state, workspace) if not args.no_register else False
+    target_root, workspace, registered = target_root_for_scope(args, state=state)
 
     target_dir = install_skill_to_root(
         source,
         target_root,
         identity,
-        replace=args.replace,
         rewrite_name=rewrite_name,
     )
     target_result = validate_skill_dir(target_dir)
@@ -779,15 +870,66 @@ def command_skill_add(args: argparse.Namespace) -> int:
     if not target_result.ok:
         return 1
 
-    archived_total, committed, pushed = sync_all(push=not args.no_push)
-    codex_count = 0 if args.no_codex_sync else copy_projects_skills_to_codex(prefix=args.codex_prefix)
+    archived_total, codex_count, committed, pushed = sync_after_skill_change(args)
     print(f"installed: {target_dir}")
     print(f"workspace: {workspace}")
     print(f"registered workspace: {str(registered).lower()}")
-    print(f"archived skills: {archived_total}")
-    print(f"codex copied skills: {codex_count}")
-    print(f"committed: {str(committed).lower()}")
-    print(f"pushed: {str(pushed).lower()}")
+    print_sync_summary(archived_total, codex_count, committed, pushed)
+    return 0
+
+
+def command_skill_update(args: argparse.Namespace) -> int:
+    source = resolve_skill_dir(args.source)
+    source_result = validate_skill_dir(source)
+    if not source_result.ok:
+        print(format_validation_result(source_result))
+        return 1
+    identity = args.name or source_result.name
+    rewrite_name = bool(args.name) or skill_identity(identity) != identity
+    state = read_state()
+    target_root, workspace, registered = target_root_for_scope(args, state=state)
+    target_dir = install_skill_to_root(
+        source,
+        target_root,
+        identity,
+        must_exist=True,
+        rewrite_name=rewrite_name,
+    )
+    target_result = validate_skill_dir(target_dir)
+    print(format_validation_result(target_result))
+    if not target_result.ok:
+        return 1
+    archived_total, codex_count, committed, pushed = sync_after_skill_change(args)
+    print(f"updated: {target_dir}")
+    print(f"workspace: {workspace}")
+    print(f"registered workspace: {str(registered).lower()}")
+    print_sync_summary(archived_total, codex_count, committed, pushed)
+    return 0
+
+
+def command_skill_directive(args: argparse.Namespace) -> int:
+    state = read_state()
+    target_root, workspace, registered = target_root_for_scope(args, state=state)
+    target_dir = resolve_existing_skill(target_root, args.identity)
+    if args.directive_command == "add":
+        body = read_text_arg(args.body, args.body_file, stage="directive")
+        append_directive(target_dir, args.title, body)
+        action = "added directive"
+    elif args.directive_command == "remove":
+        remove_directive(target_dir, args.title)
+        action = "removed directive"
+    else:
+        raise KeeperError("directive", f"unknown command: {args.directive_command}")
+    target_result = validate_skill_dir(target_dir)
+    print(format_validation_result(target_result))
+    if not target_result.ok:
+        return 1
+    archived_total, codex_count, committed, pushed = sync_after_skill_change(args)
+    print(f"{action}: {directive_slug(args.title)}")
+    print(f"skill: {target_dir}")
+    print(f"workspace: {workspace}")
+    print(f"registered workspace: {str(registered).lower()}")
+    print_sync_summary(archived_total, codex_count, committed, pushed)
     return 0
 
 
@@ -1046,12 +1188,49 @@ def build_parser() -> argparse.ArgumentParser:
     target.add_argument("--workspace", help="install into this workspace's .agents/skills; defaults to cwd")
     target.add_argument("--global", dest="global_skill", action="store_true", help="install into ~/Documents/Projects/.agents/skills")
     add.add_argument("--name", help="target skill identity; defaults to the source SKILL.md name")
-    add.add_argument("--replace", action="store_true", help="replace an existing target skill")
     add.add_argument("--no-register", action="store_true", help="do not auto-register the target workspace")
     add.add_argument("--no-push", action="store_true", help="commit but do not push datastore changes")
     add.add_argument("--no-codex-sync", action="store_true", help="do not update ~/.codex/skills")
     add.add_argument("--codex-prefix", default="keld")
     add.set_defaults(func=command_skill_add)
+    update = skill_sub.add_parser("update", help="validate and replace an existing managed skill")
+    update.add_argument("source", help="source skill directory or SKILL.md path")
+    target = update.add_mutually_exclusive_group()
+    target.add_argument("--workspace", help="update this workspace's .agents/skills; defaults to cwd")
+    target.add_argument("--global", dest="global_skill", action="store_true", help="update ~/Documents/Projects/.agents/skills")
+    update.add_argument("--name", help="target skill identity; defaults to the source SKILL.md name")
+    update.add_argument("--no-register", action="store_true", help="do not auto-register the target workspace")
+    update.add_argument("--no-push", action="store_true", help="commit but do not push datastore changes")
+    update.add_argument("--no-codex-sync", action="store_true", help="do not update ~/.codex/skills")
+    update.add_argument("--codex-prefix", default="keld")
+    update.set_defaults(func=command_skill_update)
+    directive = skill_sub.add_parser("directive", help="add or remove managed directives in a skill")
+    directive_sub = directive.add_subparsers(dest="directive_command", required=True)
+    directive_add = directive_sub.add_parser("add", help="append a titled directive to a managed skill")
+    directive_add.add_argument("identity")
+    directive_add.add_argument("--title", required=True)
+    body = directive_add.add_mutually_exclusive_group(required=True)
+    body.add_argument("--body")
+    body.add_argument("--body-file")
+    target = directive_add.add_mutually_exclusive_group()
+    target.add_argument("--workspace", help="target this workspace's .agents/skills; defaults to cwd")
+    target.add_argument("--global", dest="global_skill", action="store_true", help="target ~/Documents/Projects/.agents/skills")
+    directive_add.add_argument("--no-register", action="store_true", help="do not auto-register the target workspace")
+    directive_add.add_argument("--no-push", action="store_true", help="commit but do not push datastore changes")
+    directive_add.add_argument("--no-codex-sync", action="store_true", help="do not update ~/.codex/skills")
+    directive_add.add_argument("--codex-prefix", default="keld")
+    directive_add.set_defaults(func=command_skill_directive)
+    directive_remove = directive_sub.add_parser("remove", help="remove a titled managed directive from a skill")
+    directive_remove.add_argument("identity")
+    directive_remove.add_argument("--title", required=True)
+    target = directive_remove.add_mutually_exclusive_group()
+    target.add_argument("--workspace", help="target this workspace's .agents/skills; defaults to cwd")
+    target.add_argument("--global", dest="global_skill", action="store_true", help="target ~/Documents/Projects/.agents/skills")
+    directive_remove.add_argument("--no-register", action="store_true", help="do not auto-register the target workspace")
+    directive_remove.add_argument("--no-push", action="store_true", help="commit but do not push datastore changes")
+    directive_remove.add_argument("--no-codex-sync", action="store_true", help="do not update ~/.codex/skills")
+    directive_remove.add_argument("--codex-prefix", default="keld")
+    directive_remove.set_defaults(func=command_skill_directive)
     skill_sub.add_parser("list", help="list skill enablement flags").set_defaults(func=command_skill_list)
 
     archive = sub.add_parser("archive", help="intentionally move an active datastore skill to archive")

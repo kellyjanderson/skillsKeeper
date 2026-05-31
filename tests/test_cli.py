@@ -314,7 +314,6 @@ class SkillsKeeperTest(unittest.TestCase):
                         global_skill=True,
                         workspace=None,
                         name="renamed-skill",
-                        replace=False,
                         no_register=False,
                         no_push=True,
                         no_codex_sync=False,
@@ -349,7 +348,6 @@ class SkillsKeeperTest(unittest.TestCase):
                         global_skill=False,
                         workspace=str(workspace),
                         name=None,
-                        replace=False,
                         no_register=False,
                         no_push=True,
                         no_codex_sync=True,
@@ -368,6 +366,114 @@ class SkillsKeeperTest(unittest.TestCase):
                 cli.sync_all,
                 cli.copy_projects_skills_to_codex,
             ) = old_paths
+
+    def test_skill_add_refuses_existing_target(self) -> None:
+        old_paths = (cli.PROJECTS_SKILLS, cli.sync_all, cli.copy_projects_skills_to_codex)
+        try:
+            source = self.make_skill(self.root / "source", "existing-skill")
+            projects_skills = self.root / "Projects" / ".agents" / "skills"
+            self.make_skill(projects_skills, "existing-skill")
+            cli.PROJECTS_SKILLS = projects_skills
+            cli.sync_all = lambda push=True: (1, False, False)
+            cli.copy_projects_skills_to_codex = lambda prefix="keld", state=None: 1
+
+            with self.assertRaises(cli.KeeperError):
+                cli.command_skill_add(
+                    SimpleNamespace(
+                        source=str(source),
+                        global_skill=True,
+                        workspace=None,
+                        name=None,
+                        no_register=False,
+                        no_push=True,
+                        no_codex_sync=True,
+                        codex_prefix="keld",
+                    )
+                )
+        finally:
+            cli.PROJECTS_SKILLS, cli.sync_all, cli.copy_projects_skills_to_codex = old_paths
+
+    def test_skill_update_replaces_existing_target(self) -> None:
+        old_paths = (cli.PROJECTS_SKILLS, cli.sync_all, cli.copy_projects_skills_to_codex)
+        try:
+            source = self.make_skill(self.root / "source", "replace-me", body="# New\n")
+            projects_skills = self.root / "Projects" / ".agents" / "skills"
+            self.make_skill(projects_skills, "replace-me", body="# Old\n")
+            cli.PROJECTS_SKILLS = projects_skills
+            cli.sync_all = lambda push=True: (1, False, False)
+            cli.copy_projects_skills_to_codex = lambda prefix="keld", state=None: 1
+
+            with redirect_stdout(StringIO()):
+                result = cli.command_skill_update(
+                    SimpleNamespace(
+                        source=str(source),
+                        global_skill=True,
+                        workspace=None,
+                        name=None,
+                        no_register=False,
+                        no_push=True,
+                        no_codex_sync=True,
+                        codex_prefix="keld",
+                    )
+                )
+
+            self.assertEqual(result, 0)
+            updated = (projects_skills / "replace-me" / "SKILL.md").read_text(encoding="utf-8")
+            self.assertIn("# New", updated)
+            self.assertNotIn("# Old", updated)
+        finally:
+            cli.PROJECTS_SKILLS, cli.sync_all, cli.copy_projects_skills_to_codex = old_paths
+
+    def test_directive_add_and_remove_updates_skill(self) -> None:
+        old_paths = (cli.PROJECTS_SKILLS, cli.sync_all, cli.copy_projects_skills_to_codex)
+        try:
+            projects_skills = self.root / "Projects" / ".agents" / "skills"
+            skill = self.make_skill(projects_skills, "directive-skill", body="# Directive Skill\n")
+            cli.PROJECTS_SKILLS = projects_skills
+            cli.sync_all = lambda push=True: (1, False, False)
+            cli.copy_projects_skills_to_codex = lambda prefix="keld", state=None: 1
+
+            with redirect_stdout(StringIO()):
+                added = cli.command_skill_directive(
+                    SimpleNamespace(
+                        directive_command="add",
+                        identity="directive-skill",
+                        title="Preserve Context",
+                        body="Always preserve local context.",
+                        body_file=None,
+                        global_skill=True,
+                        workspace=None,
+                        no_register=False,
+                        no_push=True,
+                        no_codex_sync=True,
+                        codex_prefix="keld",
+                    )
+                )
+
+            text = (skill / "SKILL.md").read_text(encoding="utf-8")
+            self.assertEqual(added, 0)
+            self.assertIn("skillskeeper-directive: preserve-context", text)
+            self.assertIn("Always preserve local context.", text)
+
+            with redirect_stdout(StringIO()):
+                removed = cli.command_skill_directive(
+                    SimpleNamespace(
+                        directive_command="remove",
+                        identity="directive-skill",
+                        title="Preserve Context",
+                        global_skill=True,
+                        workspace=None,
+                        no_register=False,
+                        no_push=True,
+                        no_codex_sync=True,
+                        codex_prefix="keld",
+                    )
+                )
+
+            self.assertEqual(removed, 0)
+            self.assertNotIn("skillskeeper-directive: preserve-context", (skill / "SKILL.md").read_text(encoding="utf-8"))
+        finally:
+            cli.PROJECTS_SKILLS, cli.sync_all, cli.copy_projects_skills_to_codex = old_paths
 
 
 if __name__ == "__main__":
