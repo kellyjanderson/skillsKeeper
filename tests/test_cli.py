@@ -279,6 +279,96 @@ class SkillsKeeperTest(unittest.TestCase):
         self.assertIn("name: keld-old-name", rewritten)
         self.assertNotIn("name: old-name", rewritten)
 
+    def test_validate_skill_dir_requires_description(self) -> None:
+        skill_dir = self.root / "skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("---\nname: skill\n---\n\n# Skill\n", encoding="utf-8")
+
+        result = cli.validate_skill_dir(skill_dir)
+
+        self.assertFalse(result.ok)
+        self.assertIn("frontmatter must include description", result.errors)
+
+    def test_validate_skill_dir_accepts_valid_skill(self) -> None:
+        skill_dir = self.make_skill(self.root, "valid-skill", body="# Valid\n\nDo the thing.\n")
+
+        result = cli.validate_skill_dir(skill_dir)
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.name, "valid-skill")
+
+    def test_skill_add_global_validates_installs_and_syncs(self) -> None:
+        old_paths = (cli.PROJECTS_SKILLS, cli.sync_all, cli.copy_projects_skills_to_codex)
+        try:
+            source = self.make_skill(self.root / "source", "source-skill")
+            projects_skills = self.root / "Projects" / ".agents" / "skills"
+            cli.PROJECTS_SKILLS = projects_skills
+            calls: list[str] = []
+            cli.sync_all = lambda push=True: (1, False, False)
+            cli.copy_projects_skills_to_codex = lambda prefix="keld", state=None: calls.append(prefix) or 1
+
+            with redirect_stdout(StringIO()) as stdout:
+                result = cli.command_skill_add(
+                    SimpleNamespace(
+                        source=str(source),
+                        global_skill=True,
+                        workspace=None,
+                        name="renamed-skill",
+                        replace=False,
+                        no_register=False,
+                        no_push=True,
+                        no_codex_sync=False,
+                        codex_prefix="keld",
+                    )
+                )
+
+            self.assertEqual(result, 0)
+            installed = projects_skills / "renamed-skill" / "SKILL.md"
+            self.assertTrue(installed.exists())
+            self.assertIn("name: renamed-skill", installed.read_text(encoding="utf-8"))
+            self.assertEqual(calls, ["keld"])
+            self.assertIn("installed:", stdout.getvalue())
+        finally:
+            cli.PROJECTS_SKILLS, cli.sync_all, cli.copy_projects_skills_to_codex = old_paths
+
+    def test_skill_add_workspace_auto_registers_workspace(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE, cli.sync_all, cli.copy_projects_skills_to_codex)
+        try:
+            source = self.make_skill(self.root / "source", "workspace-skill")
+            workspace = (self.root / "workspace").resolve()
+            workspace.mkdir()
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = self.root / "store"
+            cli.sync_all = lambda push=True: (1, False, False)
+            cli.copy_projects_skills_to_codex = lambda prefix="keld", state=None: 0
+
+            with redirect_stdout(StringIO()):
+                result = cli.command_skill_add(
+                    SimpleNamespace(
+                        source=str(source),
+                        global_skill=False,
+                        workspace=str(workspace),
+                        name=None,
+                        replace=False,
+                        no_register=False,
+                        no_push=True,
+                        no_codex_sync=True,
+                        codex_prefix="keld",
+                    )
+                )
+
+            self.assertEqual(result, 0)
+            self.assertTrue((workspace / ".agents" / "skills" / "workspace-skill" / "SKILL.md").exists())
+            state = cli.read_state()
+            self.assertEqual(state["workspaces"], [{"path": str(workspace)}])
+        finally:
+            (
+                cli.STATE_PATH,
+                cli.DEFAULT_DATASTORE,
+                cli.sync_all,
+                cli.copy_projects_skills_to_codex,
+            ) = old_paths
+
 
 if __name__ == "__main__":
     unittest.main()

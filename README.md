@@ -22,6 +22,9 @@ skillskeeper codex-sync
 skillskeeper datastore init --remote git@github.com:OWNER/PRIVATE-STORE.git
 skillskeeper install --datastore-path ~/Documents/Projects/skillsKeeper-datastore
 skillskeeper service status
+skillskeeper skill validate /path/to/skill
+skillskeeper skill add /path/to/skill --workspace /path/to/workspace
+skillskeeper skill add /path/to/skill --global
 skillskeeper skill disable specifications-core
 skillskeeper skill disable specifications-core --workspace ~/Documents/Projects/example
 skillskeeper skill disable specifications-core --no-push
@@ -37,6 +40,58 @@ For each registered workspace, SkillsKeeper copies skill directories from:
 * `.agents/*/SKILL.md`
 
 Generated runtime state files are skipped. Each sync commits changes to the datastore repo so lost skills can be restored later.
+
+## Add / Validate Skills
+
+Validate one or more skill directories or `SKILL.md` files:
+
+```sh
+skillskeeper skill validate /path/to/skill
+skillskeeper skill validate /path/to/skill-a /path/to/skill-b/SKILL.md
+```
+
+Validation checks for:
+
+* a `SKILL.md` file;
+* required frontmatter delimiters;
+* required `name` and `description` metadata;
+* a non-empty skill body;
+* optional `agents/openai.yaml` basics.
+
+Add a skill to the caller's workspace, validating before and after install:
+
+```sh
+cd /path/to/workspace
+skillskeeper skill add /path/to/source-skill
+```
+
+That installs into:
+
+```text
+<workspace>/.agents/skills/<skill-name>
+```
+
+If the workspace is not registered yet, SkillsKeeper registers it by default so future `sync` and `watch` runs preserve the skill. Pass `--no-register` only when you intentionally do not want that workspace watched.
+
+Add a skill to the shared Projects skills set:
+
+```sh
+skillskeeper skill add /path/to/source-skill --global
+```
+
+That installs into:
+
+```text
+~/Documents/Projects/.agents/skills/<skill-name>
+```
+
+and mirrors to:
+
+```text
+~/.codex/skills/keld-<skill-name>
+```
+
+Use `--name <skill-name>` to rename the installed skill, and `--replace` to intentionally overwrite an existing target skill. `skill add` runs `sync` after a successful install, so the private datastore and Codex mirror are reconciled immediately.
 
 If a skill was present in the datastore but is no longer present locally, it is moved to:
 

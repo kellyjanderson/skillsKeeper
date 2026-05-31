@@ -43,6 +43,18 @@ class SkillSource:
     source_kind: str
 
 
+@dataclass(frozen=True)
+class SkillValidationResult:
+    path: Path
+    name: str
+    errors: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        return not self.errors
+
+
 def slug(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip()).strip("-")
     return cleaned or "workspace"
@@ -138,6 +150,98 @@ def parse_skill_name(skill_file: Path) -> str:
     if not match:
         return skill_file.parent.name
     return match.group(1).strip().strip("'\"") or skill_file.parent.name
+
+
+def resolve_skill_dir(path: str | Path) -> Path:
+    resolved = resolve_path(path)
+    if resolved.is_file() and resolved.name == "SKILL.md":
+        return resolved.parent
+    return resolved
+
+
+def frontmatter_block(text: str) -> tuple[dict[str, str], str, list[str]]:
+    errors: list[str] = []
+    if not text.startswith("---\n"):
+        return {}, text, ["SKILL.md must start with YAML frontmatter"]
+    end = text.find("\n---\n", 4)
+    if end == -1:
+        return {}, text, ["SKILL.md frontmatter must close with ---"]
+    metadata: dict[str, str] = {}
+    for line in text[4:end].splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if ":" not in line:
+            errors.append(f"invalid frontmatter line: {line}")
+            continue
+        key, value = line.split(":", 1)
+        metadata[key.strip()] = value.strip().strip("'\"")
+    return metadata, text[end + 5 :], errors
+
+
+def validate_skill_dir(path: str | Path) -> SkillValidationResult:
+    skill_dir = resolve_skill_dir(path)
+    errors: list[str] = []
+    warnings: list[str] = []
+    name = skill_dir.name
+    if not skill_dir.exists():
+        return SkillValidationResult(skill_dir, name, (f"skill directory does not exist: {skill_dir}",), ())
+    if not skill_dir.is_dir():
+        return SkillValidationResult(skill_dir, name, (f"skill path is not a directory: {skill_dir}",), ())
+
+    skill_file = skill_dir / "SKILL.md"
+    if not skill_file.exists():
+        return SkillValidationResult(skill_dir, name, (f"missing required file: {skill_file}",), ())
+    try:
+        text = skill_file.read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        return SkillValidationResult(skill_dir, name, (f"SKILL.md must be UTF-8 text: {error}",), ())
+    except OSError as error:
+        return SkillValidationResult(skill_dir, name, (f"failed to read SKILL.md: {error}",), ())
+
+    metadata, body, frontmatter_errors = frontmatter_block(text)
+    errors.extend(frontmatter_errors)
+    name = metadata.get("name") or name
+    description = metadata.get("description", "")
+    if not metadata.get("name"):
+        errors.append("frontmatter must include name")
+    elif skill_identity(metadata["name"]) != metadata["name"]:
+        warnings.append(f"name will be normalized by SkillsKeeper as {skill_identity(metadata['name'])}")
+    if not description:
+        errors.append("frontmatter must include description")
+    elif len(description.split()) < 6:
+        warnings.append("description is very short; Codex uses it to decide when to load the skill")
+    if not body.strip():
+        errors.append("SKILL.md body must not be empty")
+
+    agents_metadata = skill_dir / "agents" / "openai.yaml"
+    if (skill_dir / "agents").exists() and not agents_metadata.exists():
+        warnings.append("agents/ exists without agents/openai.yaml")
+    if agents_metadata.exists():
+        try:
+            metadata_text = agents_metadata.read_text(encoding="utf-8")
+        except OSError as error:
+            errors.append(f"failed to read agents/openai.yaml: {error}")
+        else:
+            for required in ("display_name:", "short_description:", "default_prompt:"):
+                if required not in metadata_text:
+                    warnings.append(f"agents/openai.yaml missing {required}")
+
+    for skipped in sorted(SKIP_FILENAMES):
+        if (skill_dir / skipped).exists():
+            warnings.append(f"{skipped} is runtime state and will be skipped during archive/copy")
+
+    return SkillValidationResult(skill_dir, name, tuple(errors), tuple(warnings))
+
+
+def format_validation_result(result: SkillValidationResult) -> str:
+    state = "ok" if result.ok else "failed"
+    lines = [f"{state}: {result.path}", f"name: {result.name}"]
+    for warning in result.warnings:
+        lines.append(f"warning: {warning}")
+    for error in result.errors:
+        lines.append(f"error: {error}")
+    return "\n".join(lines)
 
 
 def discover_skill_sources(workspace: Path) -> list[SkillSource]:
@@ -596,6 +700,97 @@ def command_skill_list(_args: argparse.Namespace) -> int:
     return 0
 
 
+def command_skill_validate(args: argparse.Namespace) -> int:
+    failed = False
+    for index, path in enumerate(args.paths):
+        if index:
+            print()
+        result = validate_skill_dir(path)
+        print(format_validation_result(result))
+        failed = failed or not result.ok
+    return 1 if failed else 0
+
+
+def ensure_workspace_registered(state: dict[str, Any], workspace: Path) -> bool:
+    resolved = resolve_path(workspace)
+    existing = {resolve_path(item["path"]) for item in state.get("workspaces", [])}
+    if resolved in existing:
+        return False
+    state.setdefault("workspaces", []).append({"path": str(resolved)})
+    state["workspaces"] = sorted(state["workspaces"], key=lambda item: item["path"])
+    write_state(state)
+    return True
+
+
+def install_skill_to_root(
+    source: Path,
+    target_root: Path,
+    identity: str,
+    *,
+    replace: bool = False,
+    rewrite_name: bool = False,
+) -> Path:
+    target_dir = target_root / skill_identity(identity)
+    if target_dir.exists() and not replace:
+        raise KeeperError("skill-add", f"target skill already exists: {target_dir}; pass --replace")
+    if source.resolve() == target_dir.resolve():
+        raise KeeperError("skill-add", f"source and target are the same directory: {source}")
+    target_root.mkdir(parents=True, exist_ok=True)
+    copy_tree_clean(source, target_dir)
+    if rewrite_name:
+        skill_file = target_dir / "SKILL.md"
+        skill_file.write_text(
+            rewrite_skill_name(skill_file.read_text(encoding="utf-8"), skill_identity(identity)),
+            encoding="utf-8",
+        )
+    return target_dir
+
+
+def command_skill_add(args: argparse.Namespace) -> int:
+    source = resolve_skill_dir(args.source)
+    source_result = validate_skill_dir(source)
+    if not source_result.ok:
+        print(format_validation_result(source_result))
+        return 1
+
+    identity = args.name or source_result.name
+    rewrite_name = bool(args.name) or skill_identity(identity) != identity
+    state = read_state()
+    if args.global_skill:
+        target_root = PROJECTS_SKILLS
+        workspace = PROJECTS_SKILLS.parent.parent
+        registered = False
+    else:
+        workspace = resolve_path(args.workspace or Path.cwd())
+        if not workspace.is_dir():
+            raise KeeperError("skill-add", f"workspace is not a directory: {workspace}")
+        target_root = workspace / ".agents" / "skills"
+        registered = ensure_workspace_registered(state, workspace) if not args.no_register else False
+
+    target_dir = install_skill_to_root(
+        source,
+        target_root,
+        identity,
+        replace=args.replace,
+        rewrite_name=rewrite_name,
+    )
+    target_result = validate_skill_dir(target_dir)
+    print(format_validation_result(target_result))
+    if not target_result.ok:
+        return 1
+
+    archived_total, committed, pushed = sync_all(push=not args.no_push)
+    codex_count = 0 if args.no_codex_sync else copy_projects_skills_to_codex(prefix=args.codex_prefix)
+    print(f"installed: {target_dir}")
+    print(f"workspace: {workspace}")
+    print(f"registered workspace: {str(registered).lower()}")
+    print(f"archived skills: {archived_total}")
+    print(f"codex copied skills: {codex_count}")
+    print(f"committed: {str(committed).lower()}")
+    print(f"pushed: {str(pushed).lower()}")
+    return 0
+
+
 def resolve_active_skill(datastore: Path, workspace: Path, source_kind: str, identity: str) -> Path:
     path = (
         datastore
@@ -842,6 +1037,21 @@ def build_parser() -> argparse.ArgumentParser:
         flag.add_argument("--no-push", action="store_true", help="commit but do not push datastore cleanup")
         flag.add_argument("--codex-prefix", default="keld")
         flag.set_defaults(func=command_skill_flag)
+    validate = skill_sub.add_parser("validate", help="validate one or more skill directories")
+    validate.add_argument("paths", nargs="+", help="skill directory or SKILL.md path")
+    validate.set_defaults(func=command_skill_validate)
+    add = skill_sub.add_parser("add", help="validate and install a skill into a managed skills folder")
+    add.add_argument("source", help="source skill directory or SKILL.md path")
+    target = add.add_mutually_exclusive_group()
+    target.add_argument("--workspace", help="install into this workspace's .agents/skills; defaults to cwd")
+    target.add_argument("--global", dest="global_skill", action="store_true", help="install into ~/Documents/Projects/.agents/skills")
+    add.add_argument("--name", help="target skill identity; defaults to the source SKILL.md name")
+    add.add_argument("--replace", action="store_true", help="replace an existing target skill")
+    add.add_argument("--no-register", action="store_true", help="do not auto-register the target workspace")
+    add.add_argument("--no-push", action="store_true", help="commit but do not push datastore changes")
+    add.add_argument("--no-codex-sync", action="store_true", help="do not update ~/.codex/skills")
+    add.add_argument("--codex-prefix", default="keld")
+    add.set_defaults(func=command_skill_add)
     skill_sub.add_parser("list", help="list skill enablement flags").set_defaults(func=command_skill_list)
 
     archive = sub.add_parser("archive", help="intentionally move an active datastore skill to archive")
