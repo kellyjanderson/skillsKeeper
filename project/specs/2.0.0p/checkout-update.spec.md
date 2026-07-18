@@ -10,7 +10,7 @@ Canonical status: `Canonical draft leaf`
 Prerequisites:
 
 - `project/specs/2.0.0p/checkout-lockfile-schema.spec.md` - update rewrites lockfile hashes
-- `project/specs/2.0.0p/checkout-status.spec.md` - update uses status classifications before writing
+- `project/specs/2.0.0p/implemented/checkout-status.spec.md` - update uses status classifications before writing
 
 ## Work Units
 
@@ -134,7 +134,7 @@ Does not own:
   - none
 - Unimplemented prerequisite specifications:
   - `project/specs/2.0.0p/checkout-lockfile-schema.spec.md` - update rewrites lockfile hashes
-  - `project/specs/2.0.0p/checkout-status.spec.md` - update uses status classifications before writing
+  - `project/specs/2.0.0p/implemented/checkout-status.spec.md` - update uses status classifications before writing
 - Progression handling:
   - implement after status and before active-surface reconciliation relies on update results.
 

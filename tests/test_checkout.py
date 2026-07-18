@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -66,6 +67,12 @@ class CheckoutLockfileTest(unittest.TestCase):
             encoding="utf-8",
         )
         return path
+
+    def prepare_checked_out_skill(self, datastore: Path, workspace: Path) -> None:
+        self.make_skill_at(datastore / "skills-library" / "skills", "source-review", body="# Clean\n")
+        self.write_graph_manifest(datastore)
+        result = cli.main(["checkout", "skill", "source-review", "--workspace", str(workspace)])
+        self.assertEqual(result, 0)
 
     def entry(self, materialized_path: str = ".agents/skills/source-review") -> checkout.CheckoutEntry:
         return checkout.CheckoutEntry(
@@ -308,6 +315,101 @@ class CheckoutLockfileTest(unittest.TestCase):
 
         self.assertFalse((workspace / ".agents" / "skills" / "alpha").exists())
         self.assertFalse(checkout.lockfile_path(workspace).exists())
+
+    def test_checkout_status_cli_reports_clean_without_mutating_files(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE)
+        try:
+            datastore = self.root / "store"
+            workspace = self.root / "workspace"
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = datastore
+            cli.write_state({"version": 1, "datastore": str(datastore), "workspaces": []})
+            with redirect_stdout(StringIO()):
+                self.prepare_checked_out_skill(datastore, workspace)
+            lockfile_before = checkout.lockfile_path(workspace).read_text(encoding="utf-8")
+            skill_path = workspace / ".agents" / "skills" / "source-review" / "SKILL.md"
+            skill_before = skill_path.read_text(encoding="utf-8")
+
+            with redirect_stdout(StringIO()) as stdout:
+                result = cli.main(["checkout", "status", "--workspace", str(workspace)])
+
+            self.assertEqual(result, 0)
+            output = stdout.getvalue()
+            self.assertIn("status: clean", output)
+            self.assertIn("entry: source-review clean", output)
+            self.assertEqual(checkout.lockfile_path(workspace).read_text(encoding="utf-8"), lockfile_before)
+            self.assertEqual(skill_path.read_text(encoding="utf-8"), skill_before)
+        finally:
+            cli.STATE_PATH, cli.DEFAULT_DATASTORE = old_paths
+
+    def test_checkout_status_cli_reports_dirty_active_copy(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE)
+        try:
+            datastore = self.root / "store"
+            workspace = self.root / "workspace"
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = datastore
+            cli.write_state({"version": 1, "datastore": str(datastore), "workspaces": []})
+            with redirect_stdout(StringIO()):
+                self.prepare_checked_out_skill(datastore, workspace)
+            (workspace / ".agents" / "skills" / "source-review" / "SKILL.md").write_text(
+                "---\nname: source-review\ndescription: Fixture skill for tests.\n---\n\n# Local edit\n",
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(StringIO()) as stdout:
+                result = cli.main(["checkout", "status", "--workspace", str(workspace)])
+
+            self.assertEqual(result, 1)
+            self.assertIn("dirty: 1", stdout.getvalue())
+            self.assertIn("entry: source-review dirty", stdout.getvalue())
+        finally:
+            cli.STATE_PATH, cli.DEFAULT_DATASTORE = old_paths
+
+    def test_checkout_status_cli_reports_missing_active_copy(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE)
+        try:
+            datastore = self.root / "store"
+            workspace = self.root / "workspace"
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = datastore
+            cli.write_state({"version": 1, "datastore": str(datastore), "workspaces": []})
+            with redirect_stdout(StringIO()):
+                self.prepare_checked_out_skill(datastore, workspace)
+            shutil.rmtree(workspace / ".agents" / "skills" / "source-review")
+
+            with redirect_stdout(StringIO()) as stdout:
+                result = cli.main(["checkout", "status", "--workspace", str(workspace)])
+
+            self.assertEqual(result, 1)
+            self.assertIn("missing: 1", stdout.getvalue())
+            self.assertIn("entry: source-review missing", stdout.getvalue())
+        finally:
+            cli.STATE_PATH, cli.DEFAULT_DATASTORE = old_paths
+
+    def test_checkout_status_cli_reports_stale_library_source(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE)
+        try:
+            datastore = self.root / "store"
+            workspace = self.root / "workspace"
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = datastore
+            cli.write_state({"version": 1, "datastore": str(datastore), "workspaces": []})
+            with redirect_stdout(StringIO()):
+                self.prepare_checked_out_skill(datastore, workspace)
+            (datastore / "skills-library" / "skills" / "source-review" / "SKILL.md").write_text(
+                "---\nname: source-review\ndescription: Fixture skill for tests.\n---\n\n# Upstream change\n",
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(StringIO()) as stdout:
+                result = cli.main(["checkout", "status", "--workspace", str(workspace)])
+
+            self.assertEqual(result, 1)
+            self.assertIn("stale: 1", stdout.getvalue())
+            self.assertIn("entry: source-review stale", stdout.getvalue())
+        finally:
+            cli.STATE_PATH, cli.DEFAULT_DATASTORE = old_paths
 
 
 if __name__ == "__main__":

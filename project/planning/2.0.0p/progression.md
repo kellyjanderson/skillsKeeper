@@ -112,7 +112,7 @@ User/caller surface: lockfile consumed by `checkout status`, `checkout update`, 
 
 - [x] Implement helper/service behavior for checkout lockfile schema.
 - [ ] Wire lockfile helpers into checkout and reconciliation consumer modules.
-  - Status: Missing prerequisite - `checkout skill` and `checkout tree` now write lockfile entries; checkout status/update and sync/watch reconciliation consumers still await `project/specs/2.0.0p/checkout-status.spec.md`; `project/specs/2.0.0p/checkout-update.spec.md`; `project/specs/2.0.0p/active-surface-sync-watch-route.spec.md`.
+  - Status: Missing prerequisite - `checkout skill`, `checkout tree`, and `checkout status` now consume lockfile entries; checkout update and sync/watch reconciliation consumers still await `project/specs/2.0.0p/checkout-update.spec.md`; `project/specs/2.0.0p/active-surface-sync-watch-route.spec.md`.
 - [x] Validate lockfile round-trip through route-level temporary fixture tests.
 - [ ] Update docs/progression/status after route validation.
 
@@ -144,22 +144,22 @@ User/caller surface: `skillskeeper checkout tree <root-id> --workspace <path>`
 
 ### Checkout Status
 
-Spec: `project/specs/2.0.0p/checkout-status.spec.md`
-Test spec: `project/specs/2.0.0p/tests/checkout-status.test-spec.md`
+Spec: `project/specs/2.0.0p/implemented/checkout-status.spec.md`
+Test spec: `project/specs/2.0.0p/tests/implemented/checkout-status.test-spec.md`
 Prerequisites: `project/specs/2.0.0p/checkout-lockfile-schema.spec.md`
 App type: console
 User/caller surface: `skillskeeper checkout status --workspace <path>`
 
-- [ ] Implement helper/service behavior for checkout status classification.
-- [ ] Wire behavior into the `checkout status` console route.
-- [ ] Validate integrated checkout status route with clean, dirty, missing, and stale fixtures.
-- [ ] Update docs/progression/status after route validation.
+- [x] Implement helper/service behavior for checkout status classification.
+- [x] Wire behavior into the `checkout status` console route.
+- [x] Validate integrated checkout status route with clean, dirty, missing, and stale fixtures.
+- [x] Update docs/progression/status after route validation.
 
 ### Checkout Update
 
 Spec: `project/specs/2.0.0p/checkout-update.spec.md`
 Test spec: `project/specs/2.0.0p/tests/checkout-update.test-spec.md`
-Prerequisites: `project/specs/2.0.0p/checkout-lockfile-schema.spec.md`; `project/specs/2.0.0p/checkout-status.spec.md`
+Prerequisites: `project/specs/2.0.0p/checkout-lockfile-schema.spec.md`; `project/specs/2.0.0p/implemented/checkout-status.spec.md`
 App type: console
 User/caller surface: `skillskeeper checkout update --workspace <path>`
 
