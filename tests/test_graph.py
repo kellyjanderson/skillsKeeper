@@ -101,6 +101,66 @@ class GraphManifestTest(unittest.TestCase):
 
         self.assertIn("cycle detected", "; ".join(error.format() for error in errors))
 
+    def traversal_payload(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "nodes": [
+                {"id": "Research Writer", "type": "profession"},
+                {"id": "writer-index", "type": "index"},
+                {"id": "drafting", "type": "skill"},
+                {"id": "review", "type": "skill"},
+                {"id": "legacy-review", "type": "skill"},
+            ],
+            "edges": [
+                {"source": "Research Writer", "target": "writer-index", "relationship": "includes"},
+                {"source": "writer-index", "target": "drafting", "relationship": "requires"},
+                {"source": "writer-index", "target": "review", "relationship": "recommends"},
+                {"source": "Research Writer", "target": "legacy-review", "relationship": "conflicts"},
+            ],
+        }
+
+    def test_resolve_top_down_returns_skills_paths_and_conflicts(self) -> None:
+        manifest = graph.load_manifest(self.write_manifest(self.traversal_payload()))
+
+        result = graph.resolve_top_down(manifest, "Research Writer")
+
+        self.assertEqual(result.resolved_ids, ("drafting", "review"))
+        self.assertEqual([path.skill_id for path in result.paths], ["drafting", "review"])
+        self.assertEqual([edge.target for edge in result.paths[0].edges], ["writer-index", "drafting"])
+        self.assertEqual(len(result.conflicts), 1)
+        self.assertEqual(result.conflicts[0].target, "legacy-review")
+
+    def test_resolve_bottom_up_reports_affected_roots(self) -> None:
+        manifest = graph.load_manifest(self.write_manifest(self.traversal_payload()))
+
+        result = graph.resolve_bottom_up(manifest, "drafting")
+
+        self.assertEqual(result.affected_roots, ("writer-index", "Research-Writer"))
+        self.assertEqual([path.root_id for path in result.paths], ["writer-index", "Research-Writer"])
+        self.assertEqual([edge.source for edge in result.paths[-1].edges], ["Research-Writer", "writer-index"])
+
+    def test_resolve_top_down_missing_root_is_explicit(self) -> None:
+        manifest = graph.load_manifest(self.write_manifest(self.traversal_payload()))
+
+        with self.assertRaisesRegex(graph.GraphManifestError, "root node does not exist"):
+            graph.resolve_top_down(manifest, "missing-root")
+
+    def test_detect_traversal_cycle_returns_diagnostic(self) -> None:
+        payload = {
+            "schema_version": 1,
+            "nodes": [
+                {"id": "alpha", "type": "skill"},
+                {"id": "beta", "type": "skill"},
+            ],
+            "edges": [
+                {"source": "alpha", "target": "beta", "relationship": "requires"},
+                {"source": "beta", "target": "alpha", "relationship": "requires"},
+            ],
+        }
+        manifest = graph.load_manifest(self.write_manifest(payload))
+
+        self.assertEqual(graph.detect_traversal_cycle(manifest, "alpha"), ["alpha -> beta -> alpha"])
+
 
 if __name__ == "__main__":
     unittest.main()

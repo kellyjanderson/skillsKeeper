@@ -80,9 +80,11 @@ Prerequisites: `project/specs/2.0.0p/implemented/graph-manifest-schema-validatio
 App type: library-only
 User/caller surface: graph traversal APIs consumed by checkout and proposal modules
 
-- [ ] Implement helper/service behavior for graph traversal APIs.
+- [x] Implement helper/service behavior for graph traversal APIs.
 - [ ] Wire traversal into checkout and proposal consumer modules.
+  - Status: Missing prerequisite - `project/specs/2.0.0p/checkout-skill-materialization.spec.md`; `project/specs/2.0.0p/checkout-tree-materialization.spec.md`; `project/specs/2.0.0p/proposal-review-impact.spec.md`.
 - [ ] Validate traversal through graph unit tests and consuming checkout/proposal route tests.
+  - Status: Missing prerequisite - graph unit tests pass; consumer route tests await checkout and proposal consumers.
 - [ ] Update docs/progression/status after route validation.
 
 ### Graph Cache CLI
