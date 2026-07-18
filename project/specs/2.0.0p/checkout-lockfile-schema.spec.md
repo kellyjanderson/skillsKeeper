@@ -9,7 +9,7 @@ Split provenance: `project/specs/2.0.0p/checkout-materialization-and-lockfile.sp
 Canonical status: `Canonical draft leaf`
 Prerequisites:
 
-- `project/specs/2.0.0p/graph-manifest-schema-validation.spec.md` - lockfile records graph ids and paths using normalized ids
+- `project/specs/2.0.0p/implemented/graph-manifest-schema-validation.spec.md` - lockfile records graph ids and paths using normalized ids
 
 ## Work Units
 
@@ -133,7 +133,7 @@ Does not own:
 - Missing prerequisite specifications:
   - none
 - Unimplemented prerequisite specifications:
-  - `project/specs/2.0.0p/graph-manifest-schema-validation.spec.md` - lockfile records graph ids and paths using normalized ids
+  - `project/specs/2.0.0p/implemented/graph-manifest-schema-validation.spec.md` - lockfile records graph ids and paths using normalized ids
 - Progression handling:
   - implement before checkout materialization and active-surface reconciliation.
 

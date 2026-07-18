@@ -9,7 +9,7 @@ Split provenance: `project/specs/2.0.0p/library-update-proposals.spec.md`
 Canonical status: `Canonical draft leaf`
 Prerequisites:
 
-- `project/specs/2.0.0p/graph-manifest-schema-validation.spec.md` - proposal target ids use graph/library ids
+- `project/specs/2.0.0p/implemented/graph-manifest-schema-validation.spec.md` - proposal target ids use graph/library ids
 
 ## Work Units
 
@@ -132,7 +132,7 @@ Does not own:
 - Missing prerequisite specifications:
   - none
 - Unimplemented prerequisite specifications:
-  - `project/specs/2.0.0p/graph-manifest-schema-validation.spec.md` - proposal target ids use graph/library ids
+  - `project/specs/2.0.0p/implemented/graph-manifest-schema-validation.spec.md` - proposal target ids use graph/library ids
 - Progression handling:
   - implement before proposal review and approve/archive leaves.
 

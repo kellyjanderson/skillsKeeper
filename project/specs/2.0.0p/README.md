@@ -6,7 +6,6 @@ Source release: `project/releases/2.0.0p.md`
 
 ## Active Implementation Leaf Specs
 
-- `project/specs/2.0.0p/graph-manifest-schema-validation.spec.md`
 - `project/specs/2.0.0p/graph-traversal-api.spec.md`
 - `project/specs/2.0.0p/graph-cache-cli.spec.md`
 - `project/specs/2.0.0p/checkout-lockfile-schema.spec.md`
@@ -36,11 +35,11 @@ Source release: `project/releases/2.0.0p.md`
 
 ## Implemented Implementation Leaf Specs
 
+- `project/specs/2.0.0p/implemented/graph-manifest-schema-validation.spec.md`
 - `project/specs/2.0.0p/implemented/global-archive-mirror-removal.spec.md`
 
 ## Active Paired Test Specs
 
-- `project/specs/2.0.0p/tests/graph-manifest-schema-validation.test-spec.md`
 - `project/specs/2.0.0p/tests/graph-traversal-api.test-spec.md`
 - `project/specs/2.0.0p/tests/graph-cache-cli.test-spec.md`
 - `project/specs/2.0.0p/tests/checkout-lockfile-schema.test-spec.md`
@@ -62,6 +61,7 @@ Source release: `project/releases/2.0.0p.md`
 
 ## Implemented Paired Test Specs
 
+- `project/specs/2.0.0p/tests/implemented/graph-manifest-schema-validation.test-spec.md`
 - `project/specs/2.0.0p/tests/implemented/global-archive-mirror-removal.test-spec.md`
 
 ## Review Ledger

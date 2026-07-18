@@ -9,7 +9,7 @@ Split provenance: `project/specs/2.0.0p/graph-manifest-and-cache.spec.md`
 Canonical status: `Canonical draft leaf`
 Prerequisites:
 
-- `project/specs/2.0.0p/graph-manifest-schema-validation.spec.md` - requires normalized valid graph input
+- `project/specs/2.0.0p/implemented/graph-manifest-schema-validation.spec.md` - requires normalized valid graph input
 
 ## Work Units
 
@@ -137,7 +137,7 @@ Does not own:
 - Missing prerequisite specifications:
   - none
 - Unimplemented prerequisite specifications:
-  - `project/specs/2.0.0p/graph-manifest-schema-validation.spec.md` - requires normalized valid graph input
+  - `project/specs/2.0.0p/implemented/graph-manifest-schema-validation.spec.md` - requires normalized valid graph input
 - Progression handling:
   - implement after manifest validation and before checkout/proposal leaves.
 

@@ -1,12 +1,12 @@
 # Graph Manifest Schema Validation Specification
 
 Date: 2026-07-17
-Status: Reviewed Draft
+Status: Implemented
 Primary ancestor: `project/architecture/skill-library-graph.md`
 Architecture ancestor: `project/architecture/skill-library-graph.md; project/architecture/acd-2.0-implementation-defaults.md`
 Source artifact: `project/architecture/skill-library-graph.md`
 Split provenance: `project/specs/2.0.0p/graph-manifest-and-cache.spec.md`
-Canonical status: `Canonical draft leaf`
+Canonical status: `Implemented canonical leaf`
 Prerequisites:
 
 - `project/architecture/acd-2.0-implementation-defaults.md` - pins JSON as canonical graph source for 2.0.0

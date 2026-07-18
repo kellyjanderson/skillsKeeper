@@ -9,7 +9,7 @@ Split provenance: `project/specs/2.0.0p/graph-manifest-and-cache.spec.md`
 Canonical status: `Canonical draft leaf`
 Prerequisites:
 
-- `project/specs/2.0.0p/graph-manifest-schema-validation.spec.md` - cache rebuild validates manifest before writing
+- `project/specs/2.0.0p/implemented/graph-manifest-schema-validation.spec.md` - cache rebuild validates manifest before writing
 
 ## Work Units
 
@@ -139,7 +139,7 @@ Does not own:
 - Missing prerequisite specifications:
   - none
 - Unimplemented prerequisite specifications:
-  - `project/specs/2.0.0p/graph-manifest-schema-validation.spec.md` - cache rebuild validates manifest before writing
+  - `project/specs/2.0.0p/implemented/graph-manifest-schema-validation.spec.md` - cache rebuild validates manifest before writing
 - Progression handling:
   - implement after manifest validation.
 

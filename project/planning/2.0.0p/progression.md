@@ -61,22 +61,22 @@ User/caller surface: `skillskeeper archive <workspace> <source-kind> <identity>`
 
 ### Graph Manifest Schema Validation
 
-Spec: `project/specs/2.0.0p/graph-manifest-schema-validation.spec.md`
-Test spec: `project/specs/2.0.0p/tests/graph-manifest-schema-validation.test-spec.md`
+Spec: `project/specs/2.0.0p/implemented/graph-manifest-schema-validation.spec.md`
+Test spec: `project/specs/2.0.0p/tests/implemented/graph-manifest-schema-validation.test-spec.md`
 Prerequisites: `project/architecture/acd-2.0-implementation-defaults.md`
 App type: library-only with console error exposure
 User/caller surface: graph validation consumed by `skillskeeper library graph rebuild` and `status`
 
-- [ ] Implement helper/service behavior for graph manifest schema validation.
-- [ ] Wire validation into the graph rebuild/status console consumers.
-- [ ] Validate integrated graph validation route through module tests and CLI rebuild failure smoke.
-- [ ] Update docs/progression/status after route validation.
+- [x] Implement helper/service behavior for graph manifest schema validation.
+- [x] Wire validation into the graph rebuild/status console consumers.
+- [x] Validate integrated graph validation route through module tests and CLI rebuild failure smoke.
+- [x] Update docs/progression/status after route validation.
 
 ### Graph Traversal API
 
 Spec: `project/specs/2.0.0p/graph-traversal-api.spec.md`
 Test spec: `project/specs/2.0.0p/tests/graph-traversal-api.test-spec.md`
-Prerequisites: `project/specs/2.0.0p/graph-manifest-schema-validation.spec.md`
+Prerequisites: `project/specs/2.0.0p/implemented/graph-manifest-schema-validation.spec.md`
 App type: library-only
 User/caller surface: graph traversal APIs consumed by checkout and proposal modules
 
@@ -89,7 +89,7 @@ User/caller surface: graph traversal APIs consumed by checkout and proposal modu
 
 Spec: `project/specs/2.0.0p/graph-cache-cli.spec.md`
 Test spec: `project/specs/2.0.0p/tests/graph-cache-cli.test-spec.md`
-Prerequisites: `project/specs/2.0.0p/graph-manifest-schema-validation.spec.md`
+Prerequisites: `project/specs/2.0.0p/implemented/graph-manifest-schema-validation.spec.md`
 App type: console
 User/caller surface: `skillskeeper library graph rebuild`; `skillskeeper library graph status`
 
@@ -104,7 +104,7 @@ User/caller surface: `skillskeeper library graph rebuild`; `skillskeeper library
 
 Spec: `project/specs/2.0.0p/checkout-lockfile-schema.spec.md`
 Test spec: `project/specs/2.0.0p/tests/checkout-lockfile-schema.test-spec.md`
-Prerequisites: `project/specs/2.0.0p/graph-manifest-schema-validation.spec.md`
+Prerequisites: `project/specs/2.0.0p/implemented/graph-manifest-schema-validation.spec.md`
 App type: library-only with console consumption
 User/caller surface: lockfile consumed by `checkout status`, `checkout update`, `sync`, and `watch`
 
@@ -171,7 +171,7 @@ User/caller surface: `skillskeeper checkout update --workspace <path>`
 
 Spec: `project/specs/2.0.0p/proposal-artifact-create.spec.md`
 Test spec: `project/specs/2.0.0p/tests/proposal-artifact-create.test-spec.md`
-Prerequisites: `project/specs/2.0.0p/graph-manifest-schema-validation.spec.md`
+Prerequisites: `project/specs/2.0.0p/implemented/graph-manifest-schema-validation.spec.md`
 App type: console
 User/caller surface: `skillskeeper library update <skill-id> --from <path>`
 

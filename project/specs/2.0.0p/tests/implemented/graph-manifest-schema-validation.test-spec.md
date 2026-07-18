@@ -1,9 +1,9 @@
 # Graph Manifest Schema Validation Test Specification
 
 Date: 2026-07-17
-Status: Reviewed Draft
-Feature spec: `project/specs/2.0.0p/graph-manifest-schema-validation.spec.md`
-Feature spec canonical status: Canonical draft leaf
+Status: Implemented
+Feature spec: `project/specs/2.0.0p/implemented/graph-manifest-schema-validation.spec.md`
+Feature spec canonical status: Implemented canonical leaf
 Architecture ancestor: `project/architecture/skill-library-graph.md; project/architecture/acd-2.0-implementation-defaults.md`
 
 ## Overview

@@ -28,7 +28,7 @@ Basis: schema validation, traversal, and cache CLI are independently deliverable
 
 ## Child Specs
 
-- `project/specs/2.0.0p/graph-manifest-schema-validation.spec.md`
+- `project/specs/2.0.0p/implemented/graph-manifest-schema-validation.spec.md`
 - `project/specs/2.0.0p/graph-traversal-api.spec.md`
 - `project/specs/2.0.0p/graph-cache-cli.spec.md`
 
@@ -40,7 +40,7 @@ Basis: schema validation, traversal, and cache CLI are independently deliverable
 
 | Parent responsibility | Status | Child spec |
 |---|---|---|
-| Manifest schema, validation, normalization, and hash output | Covered | `project/specs/2.0.0p/graph-manifest-schema-validation.spec.md` |
+| Manifest schema, validation, normalization, and hash output | Covered | `project/specs/2.0.0p/implemented/graph-manifest-schema-validation.spec.md` |
 | Top-down and bottom-up traversal API | Covered | `project/specs/2.0.0p/graph-traversal-api.spec.md` |
 | Cache metadata, rebuild command, and status command | Covered | `project/specs/2.0.0p/graph-cache-cli.spec.md` |
 

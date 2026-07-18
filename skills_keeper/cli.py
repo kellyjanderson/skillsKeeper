@@ -13,6 +13,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Literal
 
+from .graph import GraphManifestError, default_manifest_path, load_manifest, manifest_hash, normalize_manifest, validate_manifest
+from .ids import skill_identity, slug
+
 
 APP_SUPPORT = Path.home() / "Library" / "Application Support" / "SkillsKeeper"
 STATE_PATH = APP_SUPPORT / "state.json"
@@ -66,11 +69,6 @@ class ArchiveResult:
     archive_path: Path
     mirror_path: Path
     mirror_status: MirrorRemovalStatus
-
-
-def slug(value: str) -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip()).strip("-")
-    return cleaned or "workspace"
 
 
 def read_state(path: Path | None = None) -> dict[str, Any]:
@@ -373,10 +371,6 @@ def workspace_key(workspace: Path) -> str:
         return slug(str(rel))
     except ValueError:
         return slug(str(workspace))
-
-
-def skill_identity(value: str) -> str:
-    return slug(value)
 
 
 def generated_codex_mirror_path(identity: str, prefix: str = "keld", root: Path | None = None) -> Path:
@@ -754,6 +748,43 @@ def command_codex_sync(args: argparse.Namespace) -> int:
     count = copy_projects_skills_to_codex(prefix=args.prefix)
     print(f"copied skills: {count}")
     print(f"target: {CODEX_SKILLS}")
+    return 0
+
+
+def load_valid_graph_manifest_for_command(command: str) -> tuple[Path, Any]:
+    manifest_path = default_manifest_path(datastore_path(read_state()))
+    try:
+        manifest = load_manifest(manifest_path)
+    except GraphManifestError as error:
+        raise KeeperError(command, str(error)) from error
+    errors = validate_manifest(manifest)
+    if errors:
+        detail = "; ".join(error.format() for error in errors)
+        raise KeeperError(command, f"graph manifest validation failed: {detail}")
+    return manifest_path, manifest
+
+
+def command_library_graph_rebuild(_args: argparse.Namespace) -> int:
+    manifest_path, manifest = load_valid_graph_manifest_for_command("library graph rebuild")
+    normalized = normalize_manifest(manifest)
+    print(f"manifest: {manifest_path}")
+    print(f"schema version: {normalized.schema_version}")
+    print(f"nodes: {len(normalized.nodes)}")
+    print(f"edges: {len(normalized.edges)}")
+    print(f"manifest hash: {manifest_hash(normalized)}")
+    print("cache written: false")
+    return 0
+
+
+def command_library_graph_status(_args: argparse.Namespace) -> int:
+    manifest_path, manifest = load_valid_graph_manifest_for_command("library graph status")
+    normalized = normalize_manifest(manifest)
+    print(f"manifest: {manifest_path}")
+    print("status: valid")
+    print(f"schema version: {normalized.schema_version}")
+    print(f"nodes: {len(normalized.nodes)}")
+    print(f"edges: {len(normalized.edges)}")
+    print(f"manifest hash: {manifest_hash(normalized)}")
     return 0
 
 
@@ -1358,6 +1389,17 @@ def build_parser() -> argparse.ArgumentParser:
     codex = sub.add_parser("codex-sync", help="copy Projects-level skills into ~/.codex/skills with a namespace")
     codex.add_argument("--prefix", default="keld")
     codex.set_defaults(func=command_codex_sync)
+
+    library = sub.add_parser("library", help="manage reusable skill library data")
+    library_sub = library.add_subparsers(dest="library_command", required=True)
+    graph = library_sub.add_parser("graph", help="manage the reusable skill graph")
+    graph_sub = graph.add_subparsers(dest="graph_command", required=True)
+    graph_sub.add_parser("rebuild", help="validate the graph manifest before cache rebuild").set_defaults(
+        func=command_library_graph_rebuild
+    )
+    graph_sub.add_parser("status", help="show graph manifest validation status").set_defaults(
+        func=command_library_graph_status
+    )
 
     skill = sub.add_parser("skill", help="manage skill enablement flags")
     skill_sub = skill.add_subparsers(dest="skill_command", required=True)
