@@ -8,19 +8,19 @@ Do not edit `skills_keeper/` implementation files for this plan until the live
 SkillsKeeper service is no longer an editable install from this checkout, or the
 service is intentionally paused for live-instance development.
 
-The current safe planning scope is documentation under `docs/`.
+The current safe planning scope is planning artifacts under `project/`.
 
 ## Planning Basis
 
 Architecture source:
 
-- `docs/architecture/skills-library-management-architecture.md`
+- `project/architecture/skills-library-management-architecture.md`
 
 Feature definition sources:
 
-- `docs/skills-library-checkouts/skillskeeper-library-checkout-design.md`
-- `docs/skills-library-checkouts/skillskeeper-library-project-brief.md`
-- `docs/skills-library-checkouts/2026-07-17-skill-library-checkouts.md`
+- `project/notes/skills-library-checkouts/skillskeeper-library-checkout-design.md`
+- `project/notes/skills-library-checkouts/skillskeeper-library-project-brief.md`
+- `project/notes/skills-library-checkouts/2026-07-17-skill-library-checkouts.md`
 
 Issue source:
 
@@ -55,7 +55,7 @@ case. Current backup-only local management should not become archive-enforced.
 ### 1. Release Runtime Separation
 
 - Implement release install separation from
-  `docs/release-management-action-plan.md`.
+  `project/planning/release-management-action-plan.md`.
 - Move the live service away from editable source checkout operation.
 - Verify LaunchAgent points at release runtime, not this checkout.
 
