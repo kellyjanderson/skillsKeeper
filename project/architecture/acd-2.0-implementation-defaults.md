@@ -111,7 +111,7 @@ policy, overlay scope, and storage placement.
   - `project/specs/2.0.0p/graph-traversal-api.spec.md` - graph traversal defaults.
   - `project/specs/2.0.0p/implemented/graph-cache-cli.spec.md` - generated cache defaults.
   - `project/specs/2.0.0p/checkout-lockfile-schema.spec.md` - lockfile defaults.
-  - `project/specs/2.0.0p/checkout-skill-materialization.spec.md` - pinned checkout defaults.
+  - `project/specs/2.0.0p/implemented/checkout-skill-materialization.spec.md` - pinned checkout defaults.
   - `project/specs/2.0.0p/checkout-tree-materialization.spec.md` - pinned tree checkout defaults.
   - `project/specs/2.0.0p/checkout-status.spec.md` - read-only status defaults.
   - `project/specs/2.0.0p/checkout-update.spec.md` - explicit update defaults.

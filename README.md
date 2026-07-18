@@ -34,6 +34,7 @@ skillskeeper watch
 skillskeeper codex-sync
 skillskeeper library graph rebuild
 skillskeeper library graph status
+skillskeeper checkout skill source-review --workspace /path/to/workspace
 skillskeeper datastore init --remote git@github.com:OWNER/PRIVATE-STORE.git
 skillskeeper install --package dist/skillskeeper-1.0.0-py3-none-any.whl
 skillskeeper install --package . --replace-runtime --no-load
@@ -81,6 +82,24 @@ schema version. The default manifest path is:
 ```text
 <datastore>/skills-library/graph/skill-graph.json
 ```
+
+## Checkout Skills
+
+`skillskeeper checkout skill <skill-id> --workspace <path>` materializes one
+reusable library skill from the datastore into the workspace active skill
+surface:
+
+```text
+<workspace>/.agents/skills/<skill-id>
+```
+
+The command records generated ownership and the source hash in:
+
+```text
+<workspace>/.agents/skillskeeper-lock.json
+```
+
+Existing active targets with local changes are not overwritten.
 
 ## Add / Validate Skills
 

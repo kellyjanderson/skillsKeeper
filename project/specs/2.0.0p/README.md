@@ -8,7 +8,6 @@ Source release: `project/releases/2.0.0p.md`
 
 - `project/specs/2.0.0p/graph-traversal-api.spec.md`
 - `project/specs/2.0.0p/checkout-lockfile-schema.spec.md`
-- `project/specs/2.0.0p/checkout-skill-materialization.spec.md`
 - `project/specs/2.0.0p/checkout-tree-materialization.spec.md`
 - `project/specs/2.0.0p/checkout-status.spec.md`
 - `project/specs/2.0.0p/checkout-update.spec.md`
@@ -36,13 +35,13 @@ Source release: `project/releases/2.0.0p.md`
 
 - `project/specs/2.0.0p/implemented/graph-manifest-schema-validation.spec.md`
 - `project/specs/2.0.0p/implemented/graph-cache-cli.spec.md`
+- `project/specs/2.0.0p/implemented/checkout-skill-materialization.spec.md`
 - `project/specs/2.0.0p/implemented/global-archive-mirror-removal.spec.md`
 
 ## Active Paired Test Specs
 
 - `project/specs/2.0.0p/tests/graph-traversal-api.test-spec.md`
 - `project/specs/2.0.0p/tests/checkout-lockfile-schema.test-spec.md`
-- `project/specs/2.0.0p/tests/checkout-skill-materialization.test-spec.md`
 - `project/specs/2.0.0p/tests/checkout-tree-materialization.test-spec.md`
 - `project/specs/2.0.0p/tests/checkout-status.test-spec.md`
 - `project/specs/2.0.0p/tests/checkout-update.test-spec.md`
@@ -62,6 +61,7 @@ Source release: `project/releases/2.0.0p.md`
 
 - `project/specs/2.0.0p/tests/implemented/graph-manifest-schema-validation.test-spec.md`
 - `project/specs/2.0.0p/tests/implemented/graph-cache-cli.test-spec.md`
+- `project/specs/2.0.0p/tests/implemented/checkout-skill-materialization.test-spec.md`
 - `project/specs/2.0.0p/tests/implemented/global-archive-mirror-removal.test-spec.md`
 
 ## Review Ledger

@@ -10,7 +10,7 @@ Canonical status: `Canonical draft leaf`
 Prerequisites:
 
 - `project/specs/2.0.0p/active-surface-ownership-policy.spec.md` - segregation only applies after ownership classification
-- `project/specs/2.0.0p/checkout-skill-materialization.spec.md` - requires generated checkout fixtures
+- `project/specs/2.0.0p/implemented/checkout-skill-materialization.spec.md` - requires generated checkout fixtures
 
 ## Work Units
 
@@ -134,7 +134,7 @@ Does not own:
   - none
 - Unimplemented prerequisite specifications:
   - `project/specs/2.0.0p/active-surface-ownership-policy.spec.md` - segregation only applies after ownership classification
-  - `project/specs/2.0.0p/checkout-skill-materialization.spec.md` - requires generated checkout fixtures
+  - `project/specs/2.0.0p/implemented/checkout-skill-materialization.spec.md` - requires generated checkout fixtures
 - Progression handling:
   - implement after policy and checkout materialization.
 

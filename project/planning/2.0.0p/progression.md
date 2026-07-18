@@ -82,9 +82,9 @@ User/caller surface: graph traversal APIs consumed by checkout and proposal modu
 
 - [x] Implement helper/service behavior for graph traversal APIs.
 - [ ] Wire traversal into checkout and proposal consumer modules.
-  - Status: Missing prerequisite - `project/specs/2.0.0p/checkout-skill-materialization.spec.md`; `project/specs/2.0.0p/checkout-tree-materialization.spec.md`; `project/specs/2.0.0p/proposal-review-impact.spec.md`.
+  - Status: Missing prerequisite - single-skill checkout now validates graph skill metadata; traversal consumer proof still awaits `project/specs/2.0.0p/checkout-tree-materialization.spec.md` and `project/specs/2.0.0p/proposal-review-impact.spec.md`.
 - [ ] Validate traversal through graph unit tests and consuming checkout/proposal route tests.
-  - Status: Missing prerequisite - graph unit tests pass; consumer route tests await checkout and proposal consumers.
+  - Status: Missing prerequisite - graph unit tests pass; checkout tree and proposal consumer route tests are still pending.
 - [ ] Update docs/progression/status after route validation.
 
 ### Graph Cache CLI
@@ -112,23 +112,22 @@ User/caller surface: lockfile consumed by `checkout status`, `checkout update`, 
 
 - [x] Implement helper/service behavior for checkout lockfile schema.
 - [ ] Wire lockfile helpers into checkout and reconciliation consumer modules.
-  - Status: Missing prerequisite - `project/specs/2.0.0p/checkout-status.spec.md`; `project/specs/2.0.0p/checkout-update.spec.md`; `project/specs/2.0.0p/active-surface-sync-watch-route.spec.md`.
-- [ ] Validate lockfile round-trip through route-level temporary fixture tests.
-  - Status: Missing prerequisite - lockfile unit tests pass; route-level temporary fixture tests await checkout and reconciliation consumers.
+  - Status: Missing prerequisite - `checkout skill` now writes lockfile entries; checkout status/update and sync/watch reconciliation consumers still await `project/specs/2.0.0p/checkout-status.spec.md`; `project/specs/2.0.0p/checkout-update.spec.md`; `project/specs/2.0.0p/active-surface-sync-watch-route.spec.md`.
+- [x] Validate lockfile round-trip through route-level temporary fixture tests.
 - [ ] Update docs/progression/status after route validation.
 
 ### Checkout Skill Materialization
 
-Spec: `project/specs/2.0.0p/checkout-skill-materialization.spec.md`
-Test spec: `project/specs/2.0.0p/tests/checkout-skill-materialization.test-spec.md`
+Spec: `project/specs/2.0.0p/implemented/checkout-skill-materialization.spec.md`
+Test spec: `project/specs/2.0.0p/tests/implemented/checkout-skill-materialization.test-spec.md`
 Prerequisites: `project/specs/2.0.0p/checkout-lockfile-schema.spec.md`; `project/specs/2.0.0p/graph-traversal-api.spec.md`
 App type: console
 User/caller surface: `skillskeeper checkout skill <skill-id> --workspace <path>`
 
-- [ ] Implement helper/service behavior for single-skill checkout materialization.
-- [ ] Wire behavior into the `checkout skill` console route.
-- [ ] Validate integrated checkout skill route through temporary datastore/workspace fixtures.
-- [ ] Update docs/progression/status after route validation.
+- [x] Implement helper/service behavior for single-skill checkout materialization.
+- [x] Wire behavior into the `checkout skill` console route.
+- [x] Validate integrated checkout skill route through temporary datastore/workspace fixtures.
+- [x] Update docs/progression/status after route validation.
 
 ### Checkout Tree Materialization
 
@@ -242,7 +241,7 @@ User/caller surface: `skillskeeper manage-local --workspace <path> --fully-manag
 
 Spec: `project/specs/2.0.0p/active-surface-dirty-checkout-segregation.spec.md`
 Test spec: `project/specs/2.0.0p/tests/active-surface-dirty-checkout-segregation.test-spec.md`
-Prerequisites: `project/specs/2.0.0p/active-surface-ownership-policy.spec.md`; `project/specs/2.0.0p/checkout-skill-materialization.spec.md`
+Prerequisites: `project/specs/2.0.0p/active-surface-ownership-policy.spec.md`; `project/specs/2.0.0p/implemented/checkout-skill-materialization.spec.md`
 App type: library-only with mixed route consumer
 User/caller surface: reconciler consumed by `sync` and `watch`
 
