@@ -14,6 +14,8 @@ GRAPH_MANIFEST_FILENAME = "skill-graph.json"
 NODE_TYPES = {"skill", "index", "profession", "context", "phase", "standard"}
 EDGE_TYPES = {"includes", "requires", "recommends", "extends", "conflicts", "replaces"}
 ACYCLIC_EDGE_TYPES = {"includes", "requires", "extends", "replaces"}
+TOP_DOWN_EDGE_TYPES = ("includes", "requires", "recommends", "extends")
+CONFLICT_EDGE_TYPES = {"conflicts", "replaces"}
 
 
 class GraphManifestError(Exception):
@@ -49,6 +51,23 @@ class GraphManifest:
     schema_version: int
     nodes: tuple[GraphNode, ...]
     edges: tuple[GraphEdge, ...]
+
+
+@dataclass(frozen=True)
+class TraversalPath:
+    root_id: str
+    skill_id: str
+    edges: tuple[GraphEdge, ...]
+
+
+@dataclass(frozen=True)
+class TraversalResult:
+    root_id: str
+    resolved_ids: tuple[str, ...] = ()
+    affected_roots: tuple[str, ...] = ()
+    paths: tuple[TraversalPath, ...] = ()
+    conflicts: tuple[GraphEdge, ...] = ()
+    errors: tuple[str, ...] = ()
 
 
 def default_manifest_path(datastore: Path) -> Path:
@@ -175,6 +194,111 @@ def manifest_to_dict(manifest: GraphManifest) -> dict[str, Any]:
     }
 
 
+def resolve_top_down(manifest: GraphManifest, root_id: str) -> TraversalResult:
+    normalized = _valid_normalized_manifest(manifest)
+    root = skill_identity(root_id)
+    nodes = _node_map(normalized)
+    if root not in nodes:
+        raise GraphManifestError(f"root node does not exist: {root_id}")
+    outgoing = _outgoing_edges(normalized)
+    cycles = tuple(detect_traversal_cycle(normalized, root))
+    queue: list[tuple[str, tuple[GraphEdge, ...]]] = [(root, ())]
+    visited: set[str] = set()
+    resolved: list[str] = []
+    paths: list[TraversalPath] = []
+    conflicts: list[GraphEdge] = []
+    conflict_keys: set[tuple[str, str, str]] = set()
+    while queue:
+        current, path_edges = queue.pop(0)
+        if current in visited:
+            continue
+        visited.add(current)
+        node = nodes[current]
+        if node.type == "skill" and current not in resolved:
+            resolved.append(current)
+            paths.append(TraversalPath(root, current, path_edges))
+        for edge in outgoing.get(current, []):
+            if edge.relationship in CONFLICT_EDGE_TYPES:
+                key = (edge.source, edge.relationship, edge.target)
+                if key not in conflict_keys:
+                    conflicts.append(edge)
+                    conflict_keys.add(key)
+            if edge.relationship in TOP_DOWN_EDGE_TYPES:
+                queue.append((edge.target, (*path_edges, edge)))
+    return TraversalResult(
+        root_id=root,
+        resolved_ids=tuple(resolved),
+        paths=tuple(paths),
+        conflicts=tuple(conflicts),
+        errors=cycles,
+    )
+
+
+def resolve_bottom_up(manifest: GraphManifest, skill_id: str) -> TraversalResult:
+    normalized = _valid_normalized_manifest(manifest)
+    skill = skill_identity(skill_id)
+    nodes = _node_map(normalized)
+    if skill not in nodes:
+        raise GraphManifestError(f"skill node does not exist: {skill_id}")
+    incoming = _incoming_edges(normalized)
+    queue: list[tuple[str, tuple[GraphEdge, ...]]] = [(skill, ())]
+    visited: set[str] = set()
+    roots: list[str] = []
+    paths: list[TraversalPath] = []
+    conflicts: list[GraphEdge] = []
+    conflict_keys: set[tuple[str, str, str]] = set()
+    while queue:
+        current, path_edges = queue.pop(0)
+        if current in visited:
+            continue
+        visited.add(current)
+        for edge in incoming.get(current, []):
+            if edge.relationship in TOP_DOWN_EDGE_TYPES:
+                next_path = (edge, *path_edges)
+                source_node = nodes[edge.source]
+                if source_node.type != "skill" and edge.source not in roots:
+                    roots.append(edge.source)
+                    paths.append(TraversalPath(edge.source, skill, next_path))
+                queue.append((edge.source, next_path))
+            elif edge.relationship in CONFLICT_EDGE_TYPES:
+                key = (edge.source, edge.relationship, edge.target)
+                if key not in conflict_keys:
+                    conflicts.append(edge)
+                    conflict_keys.add(key)
+    return TraversalResult(
+        root_id=skill,
+        affected_roots=tuple(roots),
+        paths=tuple(paths),
+        conflicts=tuple(conflicts),
+    )
+
+
+def detect_traversal_cycle(manifest: GraphManifest, start_id: str) -> list[str]:
+    normalized = _normalize_for_traversal(manifest)
+    start = skill_identity(start_id)
+    outgoing = _outgoing_edges(normalized)
+    cycles: list[str] = []
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(node: str, path: tuple[str, ...]) -> None:
+        if node in visiting:
+            cycle_start = path.index(node) if node in path else 0
+            cycles.append(" -> ".join(path[cycle_start:]))
+            return
+        if node in visited:
+            return
+        visiting.add(node)
+        for edge in outgoing.get(node, []):
+            if edge.relationship in TOP_DOWN_EDGE_TYPES:
+                visit(edge.target, (*path, edge.target))
+        visiting.remove(node)
+        visited.add(node)
+
+    visit(start, (start,))
+    return cycles
+
+
 def _node_from_raw(item: Any, index: int) -> GraphNode:
     if not isinstance(item, dict):
         raise GraphManifestError(f"nodes[{index}] must be an object")
@@ -188,6 +312,52 @@ def _edge_from_raw(item: Any, index: int) -> GraphEdge:
     relationship = item.get("relationship", item.get("type", ""))
     metadata = {key: value for key, value in item.items() if key not in {"source", "target", "relationship", "type"}}
     return GraphEdge(str(item.get("source", "")), str(item.get("target", "")), str(relationship), metadata)
+
+
+def _valid_normalized_manifest(manifest: GraphManifest) -> GraphManifest:
+    errors = validate_manifest(manifest)
+    if errors:
+        raise GraphManifestError("; ".join(error.format() for error in errors))
+    return _normalize_for_traversal(manifest)
+
+
+def _normalize_for_traversal(manifest: GraphManifest) -> GraphManifest:
+    nodes = tuple(
+        GraphNode(skill_identity(node.id), node.type, dict(node.metadata))
+        for node in manifest.nodes
+    )
+    edges = tuple(
+        GraphEdge(
+            skill_identity(edge.source),
+            skill_identity(edge.target),
+            edge.relationship,
+            dict(edge.metadata),
+        )
+        for edge in manifest.edges
+    )
+    return GraphManifest(manifest.schema_version, nodes, edges)
+
+
+def _node_map(manifest: GraphManifest) -> dict[str, GraphNode]:
+    return {node.id: node for node in manifest.nodes}
+
+
+def _outgoing_edges(manifest: GraphManifest) -> dict[str, list[GraphEdge]]:
+    relationship_order = {relationship: index for index, relationship in enumerate(TOP_DOWN_EDGE_TYPES)}
+    result: dict[str, list[GraphEdge]] = {}
+    for edge in manifest.edges:
+        result.setdefault(edge.source, []).append(edge)
+        result[edge.source].sort(key=lambda item: relationship_order.get(item.relationship, 99))
+    return result
+
+
+def _incoming_edges(manifest: GraphManifest) -> dict[str, list[GraphEdge]]:
+    relationship_order = {relationship: index for index, relationship in enumerate(TOP_DOWN_EDGE_TYPES)}
+    result: dict[str, list[GraphEdge]] = {}
+    for edge in manifest.edges:
+        result.setdefault(edge.target, []).append(edge)
+        result[edge.target].sort(key=lambda item: relationship_order.get(item.relationship, 99))
+    return result
 
 
 def _cycle_errors(manifest: GraphManifest) -> list[GraphValidationError]:
