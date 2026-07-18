@@ -17,6 +17,9 @@ from typing import Any, Iterable
 APP_SUPPORT = Path.home() / "Library" / "Application Support" / "SkillsKeeper"
 STATE_PATH = APP_SUPPORT / "state.json"
 DEFAULT_DATASTORE = APP_SUPPORT / "datastore"
+SERVICE_RUNTIME = APP_SUPPORT / "service-runtime"
+SERVICE_VENV = SERVICE_RUNTIME / ".venv"
+SERVICE_BIN = SERVICE_VENV / "bin" / "skillskeeper"
 PROJECTS_SKILLS = Path.home() / "Documents" / "Projects" / ".agents" / "skills"
 CODEX_SKILLS = Path.home() / ".codex" / "skills"
 SKIP_FILENAMES = {".system-skills-composer.json", ".composer-state.json"}
@@ -25,7 +28,7 @@ PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCHD_LABEL}.plist"
 LOG_DIR = Path.home() / "Library" / "Logs" / "SkillsKeeper"
 ARCHIVED_DIRNAME = "archived"
 REGISTERED_DIRNAME = "registered"
-DEFAULT_SERVICE_PATH = "/Users/k/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+DEFAULT_SERVICE_PATH = f"{Path.home()}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 
 class KeeperError(Exception):
@@ -105,6 +108,17 @@ def timestamp() -> str:
 
 def run_git(args: list[str], cwd: Path, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", *args], cwd=cwd, text=True, capture_output=True, check=check)
+
+
+def run_command(args: list[str], *, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, cwd=cwd, text=True, capture_output=True, check=check)
+
+
+def run_install_command(args: list[str], *, cwd: Path | None = None) -> None:
+    result = run_command(args, cwd=cwd, check=False)
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "command failed"
+        raise KeeperError("install", f"{' '.join(args)}: {detail}")
 
 
 def ensure_git_repo(path: Path, remote: str | None = None) -> None:
@@ -310,6 +324,37 @@ def copy_tree_clean(src: Path, dst: Path) -> None:
         return {name for name in names if ignore_copy_entry(Path(name))}
     shutil.copytree(src, dst, ignore=ignore)
     make_owner_writable(dst)
+
+
+def directory_has_entries(path: Path) -> bool:
+    return path.exists() and any(path.iterdir())
+
+
+def backup_existing_file(path: Path) -> Path | None:
+    if not path.exists():
+        return None
+    backup = path.with_name(f"{path.name}.backup-{timestamp()}")
+    shutil.copy2(path, backup)
+    return backup
+
+
+def copy_datastore_for_install(source: Path, dest: Path, *, replace: bool) -> str:
+    source = resolve_path(source)
+    dest = resolve_path(dest)
+    if source == dest:
+        return "same-path"
+    if not source.exists():
+        raise KeeperError("install", f"migration source datastore does not exist: {source}")
+    if directory_has_entries(dest):
+        if not replace:
+            raise KeeperError(
+                "install",
+                f"destination datastore already exists: {dest}; pass --replace-datastore to replace it",
+            )
+        shutil.rmtree(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source, dest, symlinks=True)
+    return "copied"
 
 
 def workspace_key(workspace: Path) -> str:
@@ -1003,18 +1048,75 @@ def command_status(_args: argparse.Namespace) -> int:
     return 0
 
 
-def service_program() -> Path:
-    return Path(sys.argv[0]).resolve()
+def service_program(runtime_root: Path | None = None) -> Path:
+    if runtime_root is None:
+        return SERVICE_BIN
+    return runtime_root / ".venv" / "bin" / "skillskeeper"
 
 
-def install_launch_agent(args: argparse.Namespace) -> None:
+def service_python(runtime_root: Path | None = None) -> Path:
+    root = runtime_root or SERVICE_RUNTIME
+    return root / ".venv" / "bin" / "python"
+
+
+def source_project_root() -> Path | None:
+    candidate = Path(__file__).resolve().parents[1]
+    if (candidate / "pyproject.toml").exists():
+        return candidate
+    return None
+
+
+def resolve_install_package(value: str | None) -> Path | str:
+    if value:
+        path = Path(value).expanduser()
+        return str(path.resolve()) if path.exists() else value
+    root = source_project_root()
+    if root is None:
+        raise KeeperError(
+            "install",
+            "pass --package when installing from a non-source SkillsKeeper runtime",
+        )
+    return str(root)
+
+
+def install_service_runtime(
+    *,
+    package: str | None,
+    runtime_root: Path,
+    runtime_python: str,
+    replace: bool,
+    skip: bool,
+) -> Path:
+    program = service_program(runtime_root)
+    if skip:
+        if not program.exists():
+            raise KeeperError("install", f"service executable does not exist: {program}")
+        return program
+
+    venv = runtime_root / ".venv"
+    if replace and venv.exists():
+        shutil.rmtree(venv)
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    if not (venv / "pyvenv.cfg").exists():
+        run_install_command([runtime_python, "-m", "venv", str(venv)])
+
+    python = service_python(runtime_root)
+    package_source = resolve_install_package(package)
+    run_install_command([str(python), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
+    run_install_command([str(python), "-m", "pip", "install", "--force-reinstall", str(package_source)])
+    if not program.exists():
+        raise KeeperError("install", f"package install did not create service executable: {program}")
+    return program
+
+
+def install_launch_agent(args: argparse.Namespace, program: Path) -> Path | None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     PLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
-    program = str(service_program())
+    backup = backup_existing_file(PLIST_PATH)
     plist = {
         "Label": LAUNCHD_LABEL,
         "ProgramArguments": [
-            program,
+            str(program),
             "watch",
             "--debounce",
             str(args.debounce),
@@ -1032,6 +1134,7 @@ def install_launch_agent(args: argparse.Namespace) -> None:
         plist["ProgramArguments"].append("--no-push")
     with PLIST_PATH.open("wb") as handle:
         plistlib.dump(plist, handle)
+    return backup
 
 
 def launchctl(args: list[str], check: bool = False) -> subprocess.CompletedProcess[str]:
@@ -1039,24 +1142,47 @@ def launchctl(args: list[str], check: bool = False) -> subprocess.CompletedProce
 
 
 def command_install(args: argparse.Namespace) -> int:
+    if args.load:
+        launchctl(["bootout", f"gui/{os.getuid()}", str(PLIST_PATH)], check=False)
     state = read_state()
     if args.datastore_path:
         state["datastore"] = str(resolve_path(args.datastore_path))
     datastore = datastore_path(state)
+    datastore_migration = "none"
+    if args.migrate_datastore_from:
+        datastore_migration = copy_datastore_for_install(
+            Path(args.migrate_datastore_from),
+            datastore,
+            replace=args.replace_datastore,
+        )
     ensure_git_repo(datastore, remote=args.datastore_remote)
     inferred = infer_workspaces_from_datastore(datastore) if datastore.exists() else []
     state, added = merge_registered_workspaces(state, inferred)
+    state_backup = backup_existing_file(STATE_PATH)
     write_state(state)
-    install_launch_agent(args)
+    runtime_root = resolve_path(args.runtime_root)
+    program = install_service_runtime(
+        package=args.package,
+        runtime_root=runtime_root,
+        runtime_python=args.runtime_python,
+        replace=args.replace_runtime,
+        skip=args.skip_runtime_install,
+    )
+    plist_backup = install_launch_agent(args, program)
     if args.load:
-        launchctl(["bootout", f"gui/{os.getuid()}", str(PLIST_PATH)], check=False)
         result = launchctl(["bootstrap", f"gui/{os.getuid()}", str(PLIST_PATH)], check=False)
         if result.returncode != 0:
             raise KeeperError("launchd", result.stderr.strip() or result.stdout.strip())
         launchctl(["enable", f"gui/{os.getuid()}/{LAUNCHD_LABEL}"], check=False)
+        launchctl(["kickstart", "-k", f"gui/{os.getuid()}/{LAUNCHD_LABEL}"], check=False)
     print(f"state: {STATE_PATH}")
+    print(f"state backup: {state_backup or ''}")
     print(f"datastore: {datastore}")
+    print(f"datastore migration: {datastore_migration}")
+    print(f"service runtime: {runtime_root}")
+    print(f"service executable: {program}")
     print(f"plist: {PLIST_PATH}")
+    print(f"plist backup: {plist_backup or ''}")
     print(f"inferred workspaces added: {added}")
     print(f"loaded: {str(args.load).lower()}")
     return 0
@@ -1251,9 +1377,42 @@ def build_parser() -> argparse.ArgumentParser:
     delete_current.add_argument("--no-push", action="store_true")
     delete_current.set_defaults(func=command_delete_current_skill)
 
-    install = sub.add_parser("install", help="install SkillsKeeper state and LaunchAgent")
+    install = sub.add_parser("install", help="install SkillsKeeper service runtime, state, and LaunchAgent")
+    install.add_argument(
+        "--package",
+        help="wheel, source tree, or package spec to install non-editably into the service runtime",
+    )
+    install.add_argument(
+        "--runtime-root",
+        default=str(SERVICE_RUNTIME),
+        help="service runtime root; defaults to ~/Library/Application Support/SkillsKeeper/service-runtime",
+    )
+    install.add_argument(
+        "--runtime-python",
+        default=sys.executable,
+        help="Python executable used to create the service runtime venv",
+    )
+    install.add_argument(
+        "--replace-runtime",
+        action="store_true",
+        help="recreate the service runtime venv before installing the package",
+    )
+    install.add_argument(
+        "--skip-runtime-install",
+        action="store_true",
+        help="write state/plist only; requires an existing service executable",
+    )
     install.add_argument("--datastore-path")
     install.add_argument("--datastore-remote")
+    install.add_argument(
+        "--migrate-datastore-from",
+        help="copy an existing datastore into --datastore-path before install",
+    )
+    install.add_argument(
+        "--replace-datastore",
+        action="store_true",
+        help="replace --datastore-path when migrating from another datastore",
+    )
     install.add_argument("--debounce", type=float, default=1.0)
     install.add_argument("--no-push", action="store_true")
     install.add_argument("--no-load", action="store_false", dest="load")

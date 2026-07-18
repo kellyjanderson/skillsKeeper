@@ -253,12 +253,23 @@ class SkillsKeeperTest(unittest.TestCase):
             cli.PLIST_PATH = self.root / "LaunchAgents" / "skillskeeper.plist"
             cli.LOG_DIR = self.root / "Logs"
             explicit_store = self.root / "explicit-store"
+            runtime_root = self.root / "runtime"
+            service_bin = runtime_root / ".venv" / "bin" / "skillskeeper"
+            service_bin.parent.mkdir(parents=True)
+            service_bin.write_text("#!/bin/sh\n", encoding="utf-8")
 
             with redirect_stdout(StringIO()):
                 result = cli.command_install(
                     SimpleNamespace(
+                        package=None,
+                        runtime_root=str(runtime_root),
+                        runtime_python=str(Path("/usr/bin/python3")),
+                        replace_runtime=False,
+                        skip_runtime_install=True,
                         datastore_path=str(explicit_store),
                         datastore_remote=None,
+                        migrate_datastore_from=None,
+                        replace_datastore=False,
                         debounce=1.0,
                         no_push=True,
                         load=False,
@@ -268,6 +279,83 @@ class SkillsKeeperTest(unittest.TestCase):
             self.assertEqual(result, 0)
             self.assertFalse((self.root / "default-store" / ".git").exists())
             self.assertTrue((explicit_store / ".git").exists())
+        finally:
+            cli.STATE_PATH, cli.DEFAULT_DATASTORE, cli.PLIST_PATH, cli.LOG_DIR = old_paths
+
+    def test_install_writes_launch_agent_to_service_runtime_executable(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE, cli.PLIST_PATH, cli.LOG_DIR)
+        try:
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = self.root / "store"
+            cli.PLIST_PATH = self.root / "LaunchAgents" / "skillskeeper.plist"
+            cli.LOG_DIR = self.root / "Logs"
+            runtime_root = self.root / "runtime"
+            service_bin = runtime_root / ".venv" / "bin" / "skillskeeper"
+            service_bin.parent.mkdir(parents=True)
+            service_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+
+            with redirect_stdout(StringIO()):
+                result = cli.command_install(
+                    SimpleNamespace(
+                        package=None,
+                        runtime_root=str(runtime_root),
+                        runtime_python=str(Path("/usr/bin/python3")),
+                        replace_runtime=False,
+                        skip_runtime_install=True,
+                        datastore_path=str(self.root / "store"),
+                        datastore_remote=None,
+                        migrate_datastore_from=None,
+                        replace_datastore=False,
+                        debounce=2.5,
+                        no_push=True,
+                        load=False,
+                    )
+                )
+
+            self.assertEqual(result, 0)
+            plist = cli.plistlib.loads(cli.PLIST_PATH.read_bytes())
+            self.assertEqual(plist["ProgramArguments"][0], str(service_bin.resolve()))
+            self.assertNotIn("WorkingDirectory", plist)
+        finally:
+            cli.STATE_PATH, cli.DEFAULT_DATASTORE, cli.PLIST_PATH, cli.LOG_DIR = old_paths
+
+    def test_install_can_migrate_datastore_before_initializing_repo(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE, cli.PLIST_PATH, cli.LOG_DIR)
+        try:
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = self.root / "default-store"
+            cli.PLIST_PATH = self.root / "LaunchAgents" / "skillskeeper.plist"
+            cli.LOG_DIR = self.root / "Logs"
+            source_store = self.root / "source-store"
+            source_store.mkdir()
+            (source_store / "README.md").write_text("source datastore\n", encoding="utf-8")
+            dest_store = self.root / "dest-store"
+            runtime_root = self.root / "runtime"
+            service_bin = runtime_root / ".venv" / "bin" / "skillskeeper"
+            service_bin.parent.mkdir(parents=True)
+            service_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+
+            with redirect_stdout(StringIO()):
+                result = cli.command_install(
+                    SimpleNamespace(
+                        package=None,
+                        runtime_root=str(runtime_root),
+                        runtime_python=str(Path("/usr/bin/python3")),
+                        replace_runtime=False,
+                        skip_runtime_install=True,
+                        datastore_path=str(dest_store),
+                        datastore_remote=None,
+                        migrate_datastore_from=str(source_store),
+                        replace_datastore=False,
+                        debounce=1.0,
+                        no_push=True,
+                        load=False,
+                    )
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual((dest_store / "README.md").read_text(encoding="utf-8"), "source datastore\n")
+            self.assertTrue((dest_store / ".git").exists())
         finally:
             cli.STATE_PATH, cli.DEFAULT_DATASTORE, cli.PLIST_PATH, cli.LOG_DIR = old_paths
 

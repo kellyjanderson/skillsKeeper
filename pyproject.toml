@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "skillskeeper"
-version = "0.1.0"
+version = "1.0.0"
 description = "Register application skill folders, archive them in a private git datastore, and sync shared Projects skills into Codex."
 requires-python = ">=3.11"
 dependencies = ["watchdog>=4.0"]
@@ -12,3 +12,5 @@ dependencies = ["watchdog>=4.0"]
 [project.scripts]
 skillskeeper = "skills_keeper.cli:main"
 
+[tool.setuptools.packages.find]
+include = ["skills_keeper*"]

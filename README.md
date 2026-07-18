@@ -2,6 +2,19 @@
 
 SkillsKeeper archives agent skills from registered workspaces into a private git-backed datastore and can mirror shared `~/Documents/Projects` skills into `~/.codex/skills` with a `keld-` namespace.
 
+## Platform And Agent Intent
+
+SkillsKeeper is currently developed and tested on macOS, and the 1.0.0 service
+installer targets a per-user macOS LaunchAgent. The project is not intended to
+be macOS-only. Contributions that add Linux service support, Windows service or
+scheduled-task support, or other portable runtime paths are welcome.
+
+SkillsKeeper is Codex-centric today because it manages Codex skill folders and
+mirrors shared skills into `~/.codex/skills`. The project is not opposed to
+supporting other agent platforms. Agent-specific integrations should keep clear
+boundaries so Codex behavior remains stable while other platforms can add their
+own discovery, naming, or runtime surfaces.
+
 ## Safety Model
 
 SkillsKeeper is non-destructive by default:
@@ -20,7 +33,11 @@ skillskeeper sync
 skillskeeper watch
 skillskeeper codex-sync
 skillskeeper datastore init --remote git@github.com:OWNER/PRIVATE-STORE.git
-skillskeeper install --datastore-path ~/Documents/Projects/skillsKeeper-datastore
+skillskeeper install --package dist/skillskeeper-1.0.0-py3-none-any.whl
+skillskeeper install --package . --replace-runtime --no-load
+skillskeeper install --package dist/skillskeeper-1.0.0-py3-none-any.whl \
+  --datastore-path ~/Library/Application\ Support/SkillsKeeper/datastore \
+  --migrate-datastore-from ~/Documents/Projects/skillsKeeper-datastore
 skillskeeper service status
 skillskeeper skill validate /path/to/skill
 skillskeeper skill add /path/to/skill --workspace /path/to/workspace
@@ -191,24 +208,70 @@ This keeps the current skill set clean without destroying the local copy.
 
 ## Install
 
-`skillskeeper install` writes state under:
+`skillskeeper install` is the first-class user install path on macOS. It
+creates or updates a service runtime virtual environment, installs SkillsKeeper
+non-editably into that runtime, writes state, and installs a user LaunchAgent.
+Linux and Windows service installers are intentionally open contribution areas.
+
+The default service runtime is:
+
+```text
+~/Library/Application Support/SkillsKeeper/service-runtime/.venv
+```
+
+The LaunchAgent runs:
+
+```text
+~/Library/Application Support/SkillsKeeper/service-runtime/.venv/bin/skillskeeper
+```
+
+State is written under:
 
 ```text
 ~/Library/Application Support/SkillsKeeper/state.json
 ```
 
-and installs a user LaunchAgent:
+and the user LaunchAgent is:
 
 ```text
 ~/Library/LaunchAgents/com.kellyjanderson.skillskeeper.plist
 ```
 
-The installer can infer watched folders from `.skillskeeper-source.json` manifests in the datastore:
+Install a release wheel:
+
+```sh
+skillskeeper install --package dist/skillskeeper-1.0.0-py3-none-any.whl
+```
+
+Install from a source checkout into the service runtime without making the
+service editable from that checkout:
+
+```sh
+skillskeeper install --package . --replace-runtime
+```
+
+Prepare files without loading launchd:
+
+```sh
+skillskeeper install --package . --replace-runtime --no-load
+```
+
+Migrate an existing development datastore into Application Support during
+install:
 
 ```sh
 skillskeeper install \
-  --datastore-path ~/Documents/Projects/skillsKeeper-datastore
+  --package dist/skillskeeper-1.0.0-py3-none-any.whl \
+  --datastore-path ~/Library/Application\ Support/SkillsKeeper/datastore \
+  --migrate-datastore-from ~/Documents/Projects/skillsKeeper-datastore
 ```
+
+If the destination datastore already exists, pass `--replace-datastore` only
+after confirming replacement is intended.
+
+The installer backs up an existing `state.json` and LaunchAgent plist before
+rewriting them. It can infer watched folders from `.skillskeeper-source.json`
+manifests in the datastore.
 
 Logs are written under:
 
