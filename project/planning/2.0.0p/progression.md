@@ -110,9 +110,11 @@ Prerequisites: `project/specs/2.0.0p/implemented/graph-manifest-schema-validatio
 App type: library-only with console consumption
 User/caller surface: lockfile consumed by `checkout status`, `checkout update`, `sync`, and `watch`
 
-- [ ] Implement helper/service behavior for checkout lockfile schema.
+- [x] Implement helper/service behavior for checkout lockfile schema.
 - [ ] Wire lockfile helpers into checkout and reconciliation consumer modules.
+  - Status: Missing prerequisite - `project/specs/2.0.0p/checkout-status.spec.md`; `project/specs/2.0.0p/checkout-update.spec.md`; `project/specs/2.0.0p/active-surface-sync-watch-route.spec.md`.
 - [ ] Validate lockfile round-trip through route-level temporary fixture tests.
+  - Status: Missing prerequisite - lockfile unit tests pass; route-level temporary fixture tests await checkout and reconciliation consumers.
 - [ ] Update docs/progression/status after route validation.
 
 ### Checkout Skill Materialization
