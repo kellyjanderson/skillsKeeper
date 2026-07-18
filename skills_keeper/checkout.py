@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .graph import GraphManifest, GraphManifestError, default_manifest_path, load_manifest, validate_manifest
 from .ids import skill_identity
 
 
 LOCKFILE_VERSION = 1
 LOCKFILE_RELATIVE_PATH = Path(".agents") / "skillskeeper-lock.json"
+ACTIVE_SKILLS_RELATIVE_PATH = Path(".agents") / "skills"
+LIBRARY_ROOT = Path("skills-library")
 OWNERSHIP_CLASSES = {"library", "project-owned", "fully-managed-local", "global-managed"}
 HASH_SKIP_NAMES = {
     ".DS_Store",
@@ -41,6 +45,16 @@ class CheckoutLockfile:
     schema_version: int = LOCKFILE_VERSION
     roots: tuple[str, ...] = ()
     entries: tuple[CheckoutEntry, ...] = ()
+
+
+@dataclass(frozen=True)
+class CheckoutResult:
+    skill_id: str
+    source_path: Path
+    materialized_path: Path
+    lockfile_path: Path
+    source_hash: str
+    warnings: tuple[str, ...] = ()
 
 
 def lockfile_path(workspace: Path) -> Path:
@@ -129,6 +143,69 @@ def hash_skill_source(path: Path) -> str:
             raise CheckoutLockfileError(f"failed to read skill source file {file_path}: {error}") from error
         digest.update(b"\0")
     return f"sha256:{digest.hexdigest()}"
+
+
+def checkout_skill(workspace: Path, skill_id: str, datastore: Path) -> CheckoutResult:
+    normalized_id = skill_identity(skill_id)
+    manifest = _load_valid_manifest(datastore)
+    source_path = library_skill_source_path(datastore, manifest, normalized_id)
+    target = workspace / ACTIVE_SKILLS_RELATIVE_PATH / normalized_id
+    materialized = materialize_skill(source_path, target)
+    source_hash = hash_skill_source(source_path)
+    relative_target = materialized.relative_to(workspace).as_posix()
+    lockfile = load_lockfile(workspace)
+    entry = CheckoutEntry(
+        skill_id=normalized_id,
+        source_hash=source_hash,
+        graph_path=(normalized_id,),
+        materialized_path=relative_target,
+        ownership_class="library",
+        selected_by=(normalized_id,),
+    )
+    write_lockfile(workspace, record_checkout_entry(lockfile, entry))
+    return CheckoutResult(
+        skill_id=normalized_id,
+        source_path=source_path,
+        materialized_path=materialized,
+        lockfile_path=lockfile_path(workspace),
+        source_hash=source_hash,
+    )
+
+
+def materialize_skill(source: Path, target: Path) -> Path:
+    if not source.is_dir():
+        raise CheckoutLockfileError(f"library skill source is not a directory: {source}")
+    if not (source / "SKILL.md").is_file():
+        raise CheckoutLockfileError(f"library skill source is missing SKILL.md: {source}")
+    if target.exists():
+        if not target.is_dir():
+            raise CheckoutLockfileError(f"checkout target exists and is not a directory: {target}")
+        if hash_skill_source(target) != hash_skill_source(source):
+            raise CheckoutLockfileError(f"checkout target has local changes: {target}")
+        return target
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source, target, ignore=_copy_ignore)
+    return target
+
+
+def record_checkout_entry(lockfile: CheckoutLockfile, entry: CheckoutEntry) -> CheckoutLockfile:
+    normalized_entry = normalize_entry(entry)
+    entries = [
+        existing
+        for existing in lockfile.entries
+        if existing.skill_id != normalized_entry.skill_id
+        and existing.materialized_path != normalized_entry.materialized_path
+    ]
+    entries.append(normalized_entry)
+    roots = tuple({*lockfile.roots, *normalized_entry.selected_by})
+    return normalize_lockfile(
+        CheckoutLockfile(
+            workspace=lockfile.workspace,
+            schema_version=lockfile.schema_version,
+            roots=roots,
+            entries=tuple(entries),
+        )
+    )
 
 
 def normalize_lockfile(lockfile: CheckoutLockfile, workspace: Path | None = None) -> CheckoutLockfile:
@@ -221,6 +298,32 @@ def entry_from_dict(raw: Any, index: int = 0) -> CheckoutEntry:
     )
 
 
+def library_skill_source_path(datastore: Path, manifest: GraphManifest, skill_id: str) -> Path:
+    normalized_id = skill_identity(skill_id)
+    for node in manifest.nodes:
+        if skill_identity(node.id) != normalized_id:
+            continue
+        if node.type != "skill":
+            raise CheckoutLockfileError(f"graph node is not a skill: {skill_id}")
+        source = str(node.metadata.get("source") or (Path("skills") / normalized_id).as_posix())
+        if not _is_safe_relative_path(source):
+            raise CheckoutLockfileError(f"graph source path must be relative and safe: {source}")
+        return datastore / LIBRARY_ROOT / source
+    raise CheckoutLockfileError(f"graph skill node does not exist: {skill_id}")
+
+
+def _load_valid_manifest(datastore: Path) -> GraphManifest:
+    try:
+        manifest = load_manifest(default_manifest_path(datastore))
+    except GraphManifestError as error:
+        raise CheckoutLockfileError(str(error)) from error
+    errors = validate_manifest(manifest)
+    if errors:
+        detail = "; ".join(error.format() for error in errors)
+        raise CheckoutLockfileError(f"graph manifest validation failed: {detail}")
+    return manifest
+
+
 def _hashable_files(path: Path) -> list[Path]:
     files: list[Path] = []
     for file_path in sorted(path.rglob("*")):
@@ -229,6 +332,10 @@ def _hashable_files(path: Path) -> list[Path]:
         if file_path.is_file():
             files.append(file_path)
     return files
+
+
+def _copy_ignore(_directory: str, names: list[str]) -> set[str]:
+    return {name for name in names if name in HASH_SKIP_NAMES}
 
 
 def _is_source_hash(value: str) -> bool:

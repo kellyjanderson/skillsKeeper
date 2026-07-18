@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
 
-from skills_keeper import checkout
+from skills_keeper import checkout, cli, graph
 
 
 class CheckoutLockfileTest(unittest.TestCase):
@@ -15,13 +17,31 @@ class CheckoutLockfileTest(unittest.TestCase):
         self.root = Path(self.tmp.name)
 
     def make_skill(self, name: str, body: str = "# Skill\n") -> Path:
-        skill_dir = self.root / name
+        return self.make_skill_at(self.root, name, body=body)
+
+    def make_skill_at(self, root: Path, name: str, body: str = "# Skill\n") -> Path:
+        skill_dir = root / name
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(
             f"---\nname: {name}\ndescription: Fixture skill for tests.\n---\n\n{body}",
             encoding="utf-8",
         )
         return skill_dir
+
+    def write_graph_manifest(self, datastore: Path, skill_id: str = "source-review") -> Path:
+        path = graph.default_manifest_path(datastore)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "nodes": [{"id": skill_id, "type": "skill", "source": f"skills/{skill_id}"}],
+                    "edges": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
 
     def entry(self, materialized_path: str = ".agents/skills/source-review") -> checkout.CheckoutEntry:
         return checkout.CheckoutEntry(
@@ -140,6 +160,86 @@ class CheckoutLockfileTest(unittest.TestCase):
 
         with self.assertRaisesRegex(checkout.CheckoutLockfileError, "materialized_path duplicates"):
             checkout.write_lockfile(workspace, lockfile)
+
+    def test_checkout_skill_cli_materializes_skill_and_records_lockfile(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE)
+        try:
+            datastore = self.root / "store"
+            workspace = self.root / "workspace"
+            self.make_skill_at(datastore / "skills-library" / "skills", "source-review")
+            self.write_graph_manifest(datastore)
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = datastore
+            cli.write_state({"version": 1, "datastore": str(datastore), "workspaces": []})
+
+            with redirect_stdout(StringIO()) as stdout:
+                result = cli.main(["checkout", "skill", "source-review", "--workspace", str(workspace)])
+
+            self.assertEqual(result, 0)
+            output = stdout.getvalue()
+            self.assertIn("skill: source-review", output)
+            self.assertIn("status: checked-out", output)
+            self.assertTrue((workspace / ".agents" / "skills" / "source-review" / "SKILL.md").exists())
+            lockfile = checkout.load_lockfile(workspace)
+            self.assertEqual(len(lockfile.entries), 1)
+            self.assertEqual(lockfile.entries[0].ownership_class, "library")
+            self.assertEqual(lockfile.entries[0].materialized_path, ".agents/skills/source-review")
+        finally:
+            cli.STATE_PATH, cli.DEFAULT_DATASTORE = old_paths
+
+    def test_checkout_skill_refuses_dirty_existing_target(self) -> None:
+        datastore = self.root / "store"
+        workspace = self.root / "workspace"
+        self.make_skill_at(datastore / "skills-library" / "skills", "source-review", body="# Clean\n")
+        self.write_graph_manifest(datastore)
+        target = self.make_skill_at(workspace / ".agents" / "skills", "source-review", body="# Local edit\n")
+
+        with self.assertRaisesRegex(checkout.CheckoutLockfileError, "local changes"):
+            checkout.checkout_skill(workspace, "source-review", datastore)
+
+        self.assertIn("# Local edit", (target / "SKILL.md").read_text(encoding="utf-8"))
+        self.assertFalse(checkout.lockfile_path(workspace).exists())
+
+    def test_checkout_skill_invalid_source_does_not_leave_partial_active_copy(self) -> None:
+        datastore = self.root / "store"
+        workspace = self.root / "workspace"
+        self.write_graph_manifest(datastore)
+
+        with self.assertRaisesRegex(checkout.CheckoutLockfileError, "library skill source is not a directory"):
+            checkout.checkout_skill(workspace, "source-review", datastore)
+
+        self.assertFalse((workspace / ".agents" / "skills" / "source-review").exists())
+
+    def test_checkout_skill_cli_reports_invalid_graph_without_materializing(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE)
+        try:
+            datastore = self.root / "store"
+            workspace = self.root / "workspace"
+            self.make_skill_at(datastore / "skills-library" / "skills", "source-review")
+            path = graph.default_manifest_path(datastore)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "nodes": [{"id": "source-review", "type": "skill"}],
+                        "edges": [{"source": "source-review", "target": "missing", "relationship": "requires"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = datastore
+            cli.write_state({"version": 1, "datastore": str(datastore), "workspaces": []})
+
+            with redirect_stderr(StringIO()) as stderr:
+                result = cli.main(["checkout", "skill", "source-review", "--workspace", str(workspace)])
+
+            self.assertEqual(result, 1)
+            self.assertIn("graph manifest validation failed", stderr.getvalue())
+            self.assertFalse((workspace / ".agents" / "skills" / "source-review").exists())
+        finally:
+            cli.STATE_PATH, cli.DEFAULT_DATASTORE = old_paths
 
 
 if __name__ == "__main__":

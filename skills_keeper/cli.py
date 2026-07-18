@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Literal
 
+from .checkout import CheckoutLockfileError, checkout_skill
 from .graph import (
     GraphManifestError,
     default_cache_metadata_path,
@@ -810,6 +811,23 @@ def command_library_graph_status(_args: argparse.Namespace) -> int:
     return 0 if status.status == "fresh" else 1
 
 
+def command_checkout_skill(args: argparse.Namespace) -> int:
+    workspace = resolve_path(args.workspace)
+    try:
+        result = checkout_skill(workspace, args.skill_id, datastore_path(read_state()))
+    except CheckoutLockfileError as error:
+        raise KeeperError("checkout skill", str(error)) from error
+    print(f"skill: {result.skill_id}")
+    print("status: checked-out")
+    print(f"source: {result.source_path}")
+    print(f"materialized: {result.materialized_path}")
+    print(f"lockfile: {result.lockfile_path}")
+    print(f"source hash: {result.source_hash}")
+    for warning in result.warnings:
+        print(f"warning: {warning}")
+    return 0
+
+
 def command_skill_flag(args: argparse.Namespace) -> int:
     state = read_state()
     workspace = resolve_path(args.workspace) if args.workspace else None
@@ -1411,6 +1429,13 @@ def build_parser() -> argparse.ArgumentParser:
     codex = sub.add_parser("codex-sync", help="copy Projects-level skills into ~/.codex/skills with a namespace")
     codex.add_argument("--prefix", default="keld")
     codex.set_defaults(func=command_codex_sync)
+
+    checkout_parser = sub.add_parser("checkout", help="materialize reusable library skills")
+    checkout_sub = checkout_parser.add_subparsers(dest="checkout_command", required=True)
+    checkout_skill_parser = checkout_sub.add_parser("skill", help="checkout one reusable library skill")
+    checkout_skill_parser.add_argument("skill_id")
+    checkout_skill_parser.add_argument("--workspace", required=True)
+    checkout_skill_parser.set_defaults(func=command_checkout_skill)
 
     library = sub.add_parser("library", help="manage reusable skill library data")
     library_sub = library.add_subparsers(dest="library_command", required=True)
