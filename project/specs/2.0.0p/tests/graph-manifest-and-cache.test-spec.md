@@ -13,6 +13,6 @@ child test specifications for implementation verification.
 
 ## Child Test Specs
 
-- `project/specs/2.0.0p/tests/graph-manifest-schema-validation.test-spec.md`
+- `project/specs/2.0.0p/tests/implemented/graph-manifest-schema-validation.test-spec.md`
 - `project/specs/2.0.0p/tests/graph-traversal-api.test-spec.md`
 - `project/specs/2.0.0p/tests/graph-cache-cli.test-spec.md`

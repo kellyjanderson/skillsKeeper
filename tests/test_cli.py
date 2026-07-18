@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -778,6 +779,85 @@ class SkillsKeeperTest(unittest.TestCase):
             self.assertTrue((codex_skills / "keld-global-skill" / "SKILL.md").exists())
         finally:
             cli.STATE_PATH, cli.DEFAULT_DATASTORE, cli.PROJECTS_SKILLS, cli.CODEX_SKILLS = old_paths
+
+    def write_graph_manifest(self, datastore: Path, payload: dict[str, object]) -> Path:
+        manifest = datastore / "skills-library" / "graph" / "skill-graph.json"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(json.dumps(payload), encoding="utf-8")
+        return manifest
+
+    def valid_graph_payload(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "nodes": [
+                {"id": "Research Writer", "type": "profession"},
+                {"id": "source-review", "type": "skill"},
+            ],
+            "edges": [
+                {"source": "Research Writer", "target": "source-review", "relationship": "includes"}
+            ],
+        }
+
+    def test_library_graph_rebuild_cli_reports_manifest_hash_without_cache_write(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE)
+        try:
+            datastore = self.root / "store"
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = datastore
+            self.write_graph_manifest(datastore, self.valid_graph_payload())
+            cli.write_state({"version": 1, "datastore": str(datastore), "workspaces": []})
+
+            with redirect_stdout(StringIO()) as stdout:
+                result = cli.main(["library", "graph", "rebuild"])
+
+            output = stdout.getvalue()
+            self.assertEqual(result, 0)
+            self.assertIn("nodes: 2", output)
+            self.assertIn("edges: 1", output)
+            self.assertIn("manifest hash:", output)
+            self.assertIn("cache written: false", output)
+            self.assertFalse((datastore / "skills-library" / "graph" / "index.kuzu").exists())
+        finally:
+            cli.STATE_PATH, cli.DEFAULT_DATASTORE = old_paths
+
+    def test_library_graph_rebuild_cli_reports_validation_errors(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE)
+        try:
+            datastore = self.root / "store"
+            payload = self.valid_graph_payload()
+            payload["edges"] = [{"source": "Research Writer", "target": "missing", "relationship": "includes"}]
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = datastore
+            self.write_graph_manifest(datastore, payload)
+            cli.write_state({"version": 1, "datastore": str(datastore), "workspaces": []})
+
+            with redirect_stderr(StringIO()) as stderr:
+                result = cli.main(["library", "graph", "rebuild"])
+
+            self.assertEqual(result, 1)
+            self.assertIn("graph manifest validation failed", stderr.getvalue())
+            self.assertIn("unknown target node 'missing'", stderr.getvalue())
+            self.assertFalse((datastore / "skills-library" / "graph" / "index.kuzu").exists())
+        finally:
+            cli.STATE_PATH, cli.DEFAULT_DATASTORE = old_paths
+
+    def test_library_graph_status_cli_reports_valid_manifest(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE)
+        try:
+            datastore = self.root / "store"
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = datastore
+            self.write_graph_manifest(datastore, self.valid_graph_payload())
+            cli.write_state({"version": 1, "datastore": str(datastore), "workspaces": []})
+
+            with redirect_stdout(StringIO()) as stdout:
+                result = cli.main(["library", "graph", "status"])
+
+            self.assertEqual(result, 0)
+            self.assertIn("status: valid", stdout.getvalue())
+            self.assertIn("manifest hash:", stdout.getvalue())
+        finally:
+            cli.STATE_PATH, cli.DEFAULT_DATASTORE = old_paths
 
 
 if __name__ == "__main__":

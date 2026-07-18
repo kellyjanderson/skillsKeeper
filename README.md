@@ -32,6 +32,8 @@ skillskeeper infer --datastore ~/Documents/Projects/skillsKeeper-datastore
 skillskeeper sync
 skillskeeper watch
 skillskeeper codex-sync
+skillskeeper library graph rebuild
+skillskeeper library graph status
 skillskeeper datastore init --remote git@github.com:OWNER/PRIVATE-STORE.git
 skillskeeper install --package dist/skillskeeper-1.0.0-py3-none-any.whl
 skillskeeper install --package . --replace-runtime --no-load
@@ -60,6 +62,20 @@ For each registered workspace, SkillsKeeper copies skill directories from:
 * `.agents/*/SKILL.md`
 
 Generated runtime state files are skipped. Each sync commits changes to the datastore repo so lost skills can be restored later.
+
+## Skill Library Graph
+
+`skillskeeper library graph rebuild` validates the datastore graph manifest and
+prints its schema version, node count, edge count, and stable manifest hash. In
+2.0.0 work so far this command validates without writing generated cache files;
+cache metadata writes are planned separately.
+
+`skillskeeper library graph status` reports whether the graph manifest is valid
+and prints the same normalized manifest summary. The default manifest path is:
+
+```text
+<datastore>/skills-library/graph/skill-graph.json
+```
 
 ## Add / Validate Skills
 

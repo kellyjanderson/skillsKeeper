@@ -107,7 +107,7 @@ policy, overlay scope, and storage placement.
 - Parent specs created or affected:
   - `none`
 - Canonical child specs:
-  - `project/specs/2.0.0p/graph-manifest-schema-validation.spec.md` - graph source defaults.
+  - `project/specs/2.0.0p/implemented/graph-manifest-schema-validation.spec.md` - graph source defaults.
   - `project/specs/2.0.0p/graph-traversal-api.spec.md` - graph traversal defaults.
   - `project/specs/2.0.0p/graph-cache-cli.spec.md` - generated cache defaults.
   - `project/specs/2.0.0p/checkout-lockfile-schema.spec.md` - lockfile defaults.
