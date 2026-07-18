@@ -126,7 +126,7 @@ policy, overlay scope, and storage placement.
   - `project/specs/2.0.0p/proposal-review-impact.spec.md` - impact review defaults.
   - `project/specs/2.0.0p/proposal-approve.spec.md` - proposal approval defaults.
   - `project/specs/2.0.0p/proposal-archive.spec.md` - proposal archival defaults.
-  - `project/specs/2.0.0p/global-archive-mirror-removal.spec.md` - mirror removal defaults.
+  - `project/specs/2.0.0p/implemented/global-archive-mirror-removal.spec.md` - mirror removal defaults.
 - Paired test specs:
   - `project/specs/2.0.0p/tests/*.test-spec.md` - one paired active test spec per reviewed feature leaf.
 

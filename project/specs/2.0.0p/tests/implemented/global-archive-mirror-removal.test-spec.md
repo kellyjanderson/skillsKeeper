@@ -1,9 +1,9 @@
 # Global Archive Mirror Removal Test Specification
 
 Date: 2026-07-17
-Status: Reviewed Draft
-Feature spec: `project/specs/2.0.0p/global-archive-mirror-removal.spec.md`
-Feature spec canonical status: Canonical draft leaf
+Status: Implemented
+Feature spec: `project/specs/2.0.0p/implemented/global-archive-mirror-removal.spec.md`
+Feature spec canonical status: Implemented canonical leaf
 Architecture ancestor: `project/architecture/acd-global-archive-mirror-removal.md`
 
 ## Overview

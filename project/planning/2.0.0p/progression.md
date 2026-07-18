@@ -46,16 +46,16 @@ paused item.
 
 ### Global Archive Mirror Removal
 
-Spec: `project/specs/2.0.0p/global-archive-mirror-removal.spec.md`
-Test spec: `project/specs/2.0.0p/tests/global-archive-mirror-removal.test-spec.md`
+Spec: `project/specs/2.0.0p/implemented/global-archive-mirror-removal.spec.md`
+Test spec: `project/specs/2.0.0p/tests/implemented/global-archive-mirror-removal.test-spec.md`
 Prerequisites: none
 App type: console
 User/caller surface: `skillskeeper archive <workspace> <source-kind> <identity>`
 
-- [ ] Implement helper/service behavior for global archive mirror removal.
-- [ ] Wire behavior into the archive console route.
-- [ ] Validate integrated archive route through temporary datastore and Codex mirror fixtures.
-- [ ] Update docs/progression/status after route validation.
+- [x] Implement helper/service behavior for global archive mirror removal.
+- [x] Wire behavior into the archive console route.
+- [x] Validate integrated archive route through temporary datastore and Codex mirror fixtures.
+- [x] Update docs/progression/status after route validation.
 
 ## Lane: Graph Foundation
 

@@ -11,7 +11,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Literal
 
 
 APP_SUPPORT = Path.home() / "Library" / "Application Support" / "SkillsKeeper"
@@ -56,6 +56,16 @@ class SkillValidationResult:
     @property
     def ok(self) -> bool:
         return not self.errors
+
+
+MirrorRemovalStatus = Literal["removed", "missing", "skipped"]
+
+
+@dataclass(frozen=True)
+class ArchiveResult:
+    archive_path: Path
+    mirror_path: Path
+    mirror_status: MirrorRemovalStatus
 
 
 def slug(value: str) -> str:
@@ -367,6 +377,36 @@ def workspace_key(workspace: Path) -> str:
 
 def skill_identity(value: str) -> str:
     return slug(value)
+
+
+def generated_codex_mirror_path(identity: str, prefix: str = "keld", root: Path | None = None) -> Path:
+    root = resolve_path(root or CODEX_SKILLS)
+    mirror_name = f"{slug(prefix)}-{skill_identity(identity)}"
+    path = (root / mirror_name).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError as error:
+        raise KeeperError("archive", f"generated mirror path escapes root: {path}") from error
+    return path
+
+
+def remove_generated_codex_mirror(
+    identity: str,
+    prefix: str = "keld",
+    root: Path | None = None,
+) -> tuple[Path, MirrorRemovalStatus]:
+    mirror_path = generated_codex_mirror_path(identity, prefix=prefix, root=root)
+    if not mirror_path.exists():
+        return mirror_path, "missing"
+    if mirror_path.is_dir() and not mirror_path.is_symlink():
+        shutil.rmtree(mirror_path)
+    else:
+        mirror_path.unlink()
+    return mirror_path, "removed"
+
+
+def is_projects_global_skill(workspace: Path, source_kind: str) -> bool:
+    return source_kind == "agents-skills" and resolve_path(workspace) == resolve_path(PROJECTS_SKILLS.parent.parent)
 
 
 def skill_enabled(state: dict[str, Any], workspace: Path, identity: str) -> bool:
@@ -997,18 +1037,41 @@ def commit_and_maybe_push(datastore: Path, message: str, push: bool) -> tuple[bo
     return committed, pushed
 
 
+def archive_managed_global_skill(
+    datastore: Path,
+    workspace: Path,
+    source_kind: str,
+    identity: str,
+    codex_prefix: str = "keld",
+) -> ArchiveResult:
+    active = resolve_active_skill(datastore, workspace, source_kind, identity)
+    archived = move_active_skill_to_archive(datastore, active, reason="intentional")
+    mirror_path = generated_codex_mirror_path(identity, prefix=codex_prefix)
+    mirror_status: MirrorRemovalStatus = "skipped"
+    if is_projects_global_skill(workspace, source_kind):
+        mirror_path, mirror_status = remove_generated_codex_mirror(identity, prefix=codex_prefix)
+    return ArchiveResult(archived, mirror_path, mirror_status)
+
+
 def command_archive_skill(args: argparse.Namespace) -> int:
     state = read_state()
     datastore = datastore_path(state)
     workspace = resolve_path(args.workspace)
-    active = resolve_active_skill(datastore, workspace, args.source_kind, args.identity)
-    archived = move_active_skill_to_archive(datastore, active, reason="intentional")
+    result = archive_managed_global_skill(
+        datastore,
+        workspace,
+        args.source_kind,
+        args.identity,
+        codex_prefix=args.codex_prefix,
+    )
     committed, pushed = commit_and_maybe_push(
         datastore,
         f"Archive skill {args.identity} from {workspace_key(workspace)}",
         push=not args.no_push,
     )
-    print(f"archived: {archived}")
+    print(f"archived: {result.archive_path}")
+    print(f"codex mirror: {result.mirror_path}")
+    print(f"codex mirror status: {result.mirror_status}")
     print(f"committed: {str(committed).lower()}")
     print(f"pushed: {str(pushed).lower()}")
     return 0
@@ -1363,6 +1426,7 @@ def build_parser() -> argparse.ArgumentParser:
     archive.add_argument("workspace")
     archive.add_argument("source_kind", choices=["agents-skills", "agents-local"])
     archive.add_argument("identity")
+    archive.add_argument("--codex-prefix", default="keld")
     archive.add_argument("--no-push", action="store_true")
     archive.set_defaults(func=command_archive_skill)
 

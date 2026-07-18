@@ -1,12 +1,12 @@
 # Global Archive Mirror Removal Specification
 
 Date: 2026-07-17
-Status: Reviewed Draft
+Status: Implemented
 Primary ancestor: `project/architecture/acd-global-archive-mirror-removal.md`
 Architecture ancestor: `project/architecture/acd-global-archive-mirror-removal.md`
 Source artifact: `project/architecture/acd-global-archive-mirror-removal.md`
 Split provenance: `none`
-Canonical status: `Canonical draft leaf`
+Canonical status: `Implemented canonical leaf`
 Prerequisites:
 
 - `none` - no prerequisite spec or ACD required.
