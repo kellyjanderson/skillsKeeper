@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Literal
 
-from .checkout import CheckoutLockfileError, checkout_skill, checkout_tree
+from .checkout import CheckoutLockfileError, checkout_skill, checkout_status, checkout_tree, format_checkout_status
 from .graph import (
     GraphManifestError,
     default_cache_metadata_path,
@@ -845,6 +845,16 @@ def command_checkout_tree(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_checkout_status(args: argparse.Namespace) -> int:
+    workspace = resolve_path(args.workspace)
+    try:
+        status = checkout_status(workspace, datastore_path(read_state()))
+    except CheckoutLockfileError as error:
+        raise KeeperError("checkout status", str(error)) from error
+    print(format_checkout_status(status))
+    return 0 if status.status == "clean" else 1
+
+
 def command_skill_flag(args: argparse.Namespace) -> int:
     state = read_state()
     workspace = resolve_path(args.workspace) if args.workspace else None
@@ -1457,6 +1467,9 @@ def build_parser() -> argparse.ArgumentParser:
     checkout_tree_parser.add_argument("root_id")
     checkout_tree_parser.add_argument("--workspace", required=True)
     checkout_tree_parser.set_defaults(func=command_checkout_tree)
+    checkout_status_parser = checkout_sub.add_parser("status", help="show generated checkout status")
+    checkout_status_parser.add_argument("--workspace", required=True)
+    checkout_status_parser.set_defaults(func=command_checkout_status)
 
     library = sub.add_parser("library", help="manage reusable skill library data")
     library_sub = library.add_subparsers(dest="library_command", required=True)

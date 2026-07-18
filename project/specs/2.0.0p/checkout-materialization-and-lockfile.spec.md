@@ -31,7 +31,7 @@ Basis: lockfile, skill checkout, tree checkout, status, and update each have sep
 - `project/specs/2.0.0p/checkout-lockfile-schema.spec.md`
 - `project/specs/2.0.0p/implemented/checkout-skill-materialization.spec.md`
 - `project/specs/2.0.0p/implemented/checkout-tree-materialization.spec.md`
-- `project/specs/2.0.0p/checkout-status.spec.md`
+- `project/specs/2.0.0p/implemented/checkout-status.spec.md`
 - `project/specs/2.0.0p/checkout-update.spec.md`
 
 ## Split Coverage
@@ -45,7 +45,7 @@ Basis: lockfile, skill checkout, tree checkout, status, and update each have sep
 | Lockfile schema, hashes, and persistence | Covered | `project/specs/2.0.0p/checkout-lockfile-schema.spec.md` |
 | Single skill checkout route | Covered | `project/specs/2.0.0p/implemented/checkout-skill-materialization.spec.md` |
 | Tree checkout route | Covered | `project/specs/2.0.0p/implemented/checkout-tree-materialization.spec.md` |
-| Read-only status route | Covered | `project/specs/2.0.0p/checkout-status.spec.md` |
+| Read-only status route | Covered | `project/specs/2.0.0p/implemented/checkout-status.spec.md` |
 | Explicit pinned update route | Covered | `project/specs/2.0.0p/checkout-update.spec.md` |
 
 - Parent responsibilities still missing from children:

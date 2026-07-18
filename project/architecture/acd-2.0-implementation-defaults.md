@@ -113,7 +113,7 @@ policy, overlay scope, and storage placement.
   - `project/specs/2.0.0p/checkout-lockfile-schema.spec.md` - lockfile defaults.
   - `project/specs/2.0.0p/implemented/checkout-skill-materialization.spec.md` - pinned checkout defaults.
   - `project/specs/2.0.0p/implemented/checkout-tree-materialization.spec.md` - pinned tree checkout defaults.
-  - `project/specs/2.0.0p/checkout-status.spec.md` - read-only status defaults.
+  - `project/specs/2.0.0p/implemented/checkout-status.spec.md` - read-only status defaults.
   - `project/specs/2.0.0p/checkout-update.spec.md` - explicit update defaults.
   - `project/specs/2.0.0p/checkout-segregated-localize.spec.md` - overlay deferral and generated-to-local recovery defaults.
   - `project/specs/2.0.0p/checkout-segregated-discard.spec.md` - overlay deferral and explicit discard recovery defaults.

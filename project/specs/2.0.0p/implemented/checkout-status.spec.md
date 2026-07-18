@@ -1,12 +1,12 @@
 # Checkout Status Specification
 
 Date: 2026-07-17
-Status: Reviewed Draft
+Status: Implemented
 Primary ancestor: `project/architecture/project-checkouts-and-active-surface.md`
 Architecture ancestor: `project/architecture/project-checkouts-and-active-surface.md; project/architecture/acd-2.0-implementation-defaults.md`
 Source artifact: `project/architecture/project-checkouts-and-active-surface.md`
 Split provenance: `project/specs/2.0.0p/checkout-materialization-and-lockfile.spec.md`
-Canonical status: `Canonical draft leaf`
+Canonical status: `Implemented canonical leaf`
 Prerequisites:
 
 - `project/specs/2.0.0p/checkout-lockfile-schema.spec.md` - status reads lockfile entries

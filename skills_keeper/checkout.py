@@ -78,6 +78,45 @@ class CheckoutTreeResult:
     warnings: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class CheckoutEntryStatus:
+    skill_id: str
+    status: str
+    materialized_path: Path
+    source_path: Path
+    pinned_hash: str
+    active_hash: str | None = None
+    source_hash: str | None = None
+    message: str = ""
+
+
+@dataclass(frozen=True)
+class CheckoutStatus:
+    workspace: Path
+    lockfile_path: Path
+    entries: tuple[CheckoutEntryStatus, ...]
+
+    @property
+    def status(self) -> str:
+        return "clean" if all(entry.status == "clean" for entry in self.entries) else "attention"
+
+    @property
+    def clean(self) -> int:
+        return sum(1 for entry in self.entries if entry.status == "clean")
+
+    @property
+    def dirty(self) -> int:
+        return sum(1 for entry in self.entries if entry.status == "dirty")
+
+    @property
+    def missing(self) -> int:
+        return sum(1 for entry in self.entries if entry.status == "missing")
+
+    @property
+    def stale(self) -> int:
+        return sum(1 for entry in self.entries if entry.status == "stale")
+
+
 def lockfile_path(workspace: Path) -> Path:
     return workspace / LOCKFILE_RELATIVE_PATH
 
@@ -243,6 +282,34 @@ def plan_checkout_tree(workspace: Path, datastore: Path, manifest: GraphManifest
     return CheckoutPlan(traversal.root_id, tuple(items))
 
 
+def checkout_status(workspace: Path, datastore: Path) -> CheckoutStatus:
+    lockfile = load_lockfile(workspace)
+    manifest = _load_valid_manifest(datastore)
+    return CheckoutStatus(
+        workspace=workspace.resolve(),
+        lockfile_path=lockfile_path(workspace),
+        entries=tuple(_entry_status(workspace, datastore, manifest, entry) for entry in lockfile.entries),
+    )
+
+
+def format_checkout_status(status: CheckoutStatus) -> str:
+    lines = [
+        f"workspace: {status.workspace}",
+        f"lockfile: {status.lockfile_path}",
+        f"status: {status.status}",
+        f"entries: {len(status.entries)}",
+        f"clean: {status.clean}",
+        f"dirty: {status.dirty}",
+        f"missing: {status.missing}",
+        f"stale: {status.stale}",
+    ]
+    for entry in status.entries:
+        lines.append(f"entry: {entry.skill_id} {entry.status} {entry.materialized_path}")
+        if entry.message:
+            lines.append(f"message: {entry.skill_id}: {entry.message}")
+    return "\n".join(lines)
+
+
 def materialize_skill(source: Path, target: Path) -> Path:
     if not source.is_dir():
         raise CheckoutLockfileError(f"library skill source is not a directory: {source}")
@@ -285,6 +352,7 @@ def record_checkout_entries(lockfile: CheckoutLockfile, entries: tuple[CheckoutE
             entries=tuple(next_entries),
         )
     )
+
 
 def normalize_lockfile(lockfile: CheckoutLockfile, workspace: Path | None = None) -> CheckoutLockfile:
     return CheckoutLockfile(
@@ -435,6 +503,77 @@ def _traversal_graph_path(edges: tuple[Any, ...], skill_id: str) -> tuple[str, .
     path = [edges[0].source]
     path.extend(edge.target for edge in edges)
     return tuple(path)
+
+
+def _entry_status(
+    workspace: Path,
+    datastore: Path,
+    manifest: GraphManifest,
+    entry: CheckoutEntry,
+) -> CheckoutEntryStatus:
+    active_path = workspace / entry.materialized_path
+    source_path = library_skill_source_path(datastore, manifest, entry.skill_id)
+    if not active_path.exists():
+        return CheckoutEntryStatus(
+            entry.skill_id,
+            "missing",
+            active_path,
+            source_path,
+            entry.source_hash,
+            message="active checkout is missing",
+        )
+    if not active_path.is_dir():
+        return CheckoutEntryStatus(
+            entry.skill_id,
+            "dirty",
+            active_path,
+            source_path,
+            entry.source_hash,
+            message="active checkout path is not a directory",
+        )
+    active_hash = hash_skill_source(active_path)
+    if active_hash != entry.source_hash:
+        return CheckoutEntryStatus(
+            entry.skill_id,
+            "dirty",
+            active_path,
+            source_path,
+            entry.source_hash,
+            active_hash=active_hash,
+            message="active checkout hash differs from lockfile",
+        )
+    try:
+        source_hash = hash_skill_source(source_path)
+    except CheckoutLockfileError:
+        return CheckoutEntryStatus(
+            entry.skill_id,
+            "stale",
+            active_path,
+            source_path,
+            entry.source_hash,
+            active_hash=active_hash,
+            message="library source is unavailable",
+        )
+    if source_hash != entry.source_hash:
+        return CheckoutEntryStatus(
+            entry.skill_id,
+            "stale",
+            active_path,
+            source_path,
+            entry.source_hash,
+            active_hash=active_hash,
+            source_hash=source_hash,
+            message="library source hash differs from lockfile",
+        )
+    return CheckoutEntryStatus(
+        entry.skill_id,
+        "clean",
+        active_path,
+        source_path,
+        entry.source_hash,
+        active_hash=active_hash,
+        source_hash=source_hash,
+    )
 
 
 def _is_source_hash(value: str) -> bool:
