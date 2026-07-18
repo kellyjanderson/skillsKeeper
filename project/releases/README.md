@@ -23,5 +23,5 @@ Expected outcomes:
 
 Related plan:
 
-- `docs/release-management-action-plan.md`
+- `project/planning/release-management-action-plan.md`
 

@@ -22,10 +22,10 @@ deciding whether to back up, restore, segregate, archive, or mirror a change.
 
 ## Source Documents
 
-- `docs/skills-library-checkouts/skillskeeper-library-checkout-design.md`
-- `docs/skills-library-checkouts/skillskeeper-library-project-brief.md`
-- `docs/skills-library-checkouts/2026-07-17-skill-library-checkouts.md`
-- `docs/release-management-action-plan.md`
+- `project/notes/skills-library-checkouts/skillskeeper-library-checkout-design.md`
+- `project/notes/skills-library-checkouts/skillskeeper-library-project-brief.md`
+- `project/notes/skills-library-checkouts/2026-07-17-skill-library-checkouts.md`
+- `project/planning/release-management-action-plan.md`
 
 ## Current Reality
 

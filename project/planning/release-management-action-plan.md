@@ -175,7 +175,7 @@ Acceptance:
 
 ### 5. Add Release Documentation Surfaces
 
-- Create `docs/releases/README.md` to describe release definitions and release
+- Create `project/releases/README.md` to describe release definitions and release
   notes.
 - Add one initial release definition for the install/migration milestone.
 - Keep release definitions separate from progression checklists.
