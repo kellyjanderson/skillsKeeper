@@ -153,6 +153,11 @@ skillskeeper archive /path/to/workspace agents-skills skill-name
 skillskeeper archive /path/to/workspace agents-local skill-name
 ```
 
+When archiving a managed global skill from `~/Documents/Projects`, the matching
+generated Codex mirror is removed from `~/.codex/skills` and the command prints
+the mirror path plus `removed`, `missing`, or `skipped` status. Use
+`--codex-prefix` if the generated mirror uses a prefix other than `keld`.
+
 To intentionally remove a skill from the current active datastore set:
 
 ```sh

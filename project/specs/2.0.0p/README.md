@@ -25,7 +25,6 @@ Source release: `project/releases/2.0.0p.md`
 - `project/specs/2.0.0p/proposal-review-impact.spec.md`
 - `project/specs/2.0.0p/proposal-approve.spec.md`
 - `project/specs/2.0.0p/proposal-archive.spec.md`
-- `project/specs/2.0.0p/global-archive-mirror-removal.spec.md`
 
 ## Superseded Parent Specs
 
@@ -34,6 +33,10 @@ Source release: `project/releases/2.0.0p.md`
 - `project/specs/2.0.0p/active-surface-reconciliation.spec.md`
 - `project/specs/2.0.0p/library-update-proposals.spec.md`
 - `project/specs/2.0.0p/checkout-segregated-localize-discard.spec.md`
+
+## Implemented Implementation Leaf Specs
+
+- `project/specs/2.0.0p/implemented/global-archive-mirror-removal.spec.md`
 
 ## Active Paired Test Specs
 
@@ -56,7 +59,10 @@ Source release: `project/releases/2.0.0p.md`
 - `project/specs/2.0.0p/tests/proposal-review-impact.test-spec.md`
 - `project/specs/2.0.0p/tests/proposal-approve.test-spec.md`
 - `project/specs/2.0.0p/tests/proposal-archive.test-spec.md`
-- `project/specs/2.0.0p/tests/global-archive-mirror-removal.test-spec.md`
+
+## Implemented Paired Test Specs
+
+- `project/specs/2.0.0p/tests/implemented/global-archive-mirror-removal.test-spec.md`
 
 ## Review Ledger
 

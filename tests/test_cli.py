@@ -563,6 +563,222 @@ class SkillsKeeperTest(unittest.TestCase):
         finally:
             cli.PROJECTS_SKILLS, cli.sync_all, cli.copy_projects_skills_to_codex = old_paths
 
+    def make_active_datastore_skill(
+        self,
+        datastore: Path,
+        workspace: Path,
+        source_kind: str,
+        identity: str,
+    ) -> Path:
+        workspace = cli.resolve_path(workspace)
+        skill = self.make_skill(
+            datastore / "registered" / cli.workspace_key(workspace) / source_kind,
+            identity,
+        )
+        (skill / ".skillskeeper-source.json").write_text(
+            "{}\n",
+            encoding="utf-8",
+        )
+        return skill
+
+    def test_archive_global_skill_removes_matching_codex_mirror(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE, cli.PROJECTS_SKILLS, cli.CODEX_SKILLS, cli.git_commit_all)
+        try:
+            datastore = self.root / "store"
+            projects_root = self.root / "Projects"
+            projects_skills = projects_root / ".agents" / "skills"
+            codex_skills = self.root / "codex-skills"
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = datastore
+            cli.PROJECTS_SKILLS = projects_skills
+            cli.CODEX_SKILLS = codex_skills
+            cli.git_commit_all = lambda _path, _message: False
+            self.make_active_datastore_skill(datastore, projects_root, "agents-skills", "global-skill")
+            self.make_skill(codex_skills, "keld-global-skill")
+            self.make_skill(codex_skills, "keld-other-skill")
+            cli.write_state({"version": 1, "datastore": str(datastore), "workspaces": []})
+
+            with redirect_stdout(StringIO()) as stdout:
+                result = cli.command_archive_skill(
+                    SimpleNamespace(
+                        workspace=str(projects_root),
+                        source_kind="agents-skills",
+                        identity="global-skill",
+                        codex_prefix="keld",
+                        no_push=True,
+                    )
+                )
+
+            self.assertEqual(result, 0)
+            output = stdout.getvalue()
+            self.assertIn("codex mirror status: removed", output)
+            self.assertFalse((codex_skills / "keld-global-skill").exists())
+            self.assertTrue((codex_skills / "keld-other-skill" / "SKILL.md").exists())
+            archived = list(datastore.glob("archived/intentional/*/*/agents-skills/global-skill/SKILL.md"))
+            self.assertEqual(len(archived), 1)
+        finally:
+            cli.STATE_PATH, cli.DEFAULT_DATASTORE, cli.PROJECTS_SKILLS, cli.CODEX_SKILLS, cli.git_commit_all = old_paths
+
+    def test_archive_cli_route_removes_matching_codex_mirror(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE, cli.PROJECTS_SKILLS, cli.CODEX_SKILLS, cli.git_commit_all)
+        try:
+            datastore = self.root / "store"
+            projects_root = self.root / "Projects"
+            codex_skills = self.root / "codex-skills"
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = datastore
+            cli.PROJECTS_SKILLS = projects_root / ".agents" / "skills"
+            cli.CODEX_SKILLS = codex_skills
+            cli.git_commit_all = lambda _path, _message: False
+            self.make_active_datastore_skill(datastore, projects_root, "agents-skills", "global-skill")
+            self.make_skill(codex_skills, "keld-global-skill")
+            cli.write_state({"version": 1, "datastore": str(datastore), "workspaces": []})
+
+            with redirect_stdout(StringIO()) as stdout:
+                result = cli.main(
+                    [
+                        "archive",
+                        str(projects_root),
+                        "agents-skills",
+                        "global-skill",
+                        "--no-push",
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            output = stdout.getvalue()
+            self.assertIn("archived:", output)
+            self.assertIn("codex mirror:", output)
+            self.assertIn("codex mirror status: removed", output)
+            self.assertFalse((codex_skills / "keld-global-skill").exists())
+            archived = list(datastore.glob("archived/intentional/*/*/agents-skills/global-skill/SKILL.md"))
+            self.assertEqual(len(archived), 1)
+        finally:
+            cli.STATE_PATH, cli.DEFAULT_DATASTORE, cli.PROJECTS_SKILLS, cli.CODEX_SKILLS, cli.git_commit_all = old_paths
+
+    def test_archive_global_skill_reports_missing_codex_mirror_as_success(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE, cli.PROJECTS_SKILLS, cli.CODEX_SKILLS, cli.git_commit_all)
+        try:
+            datastore = self.root / "store"
+            projects_root = self.root / "Projects"
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = datastore
+            cli.PROJECTS_SKILLS = projects_root / ".agents" / "skills"
+            cli.CODEX_SKILLS = self.root / "codex-skills"
+            cli.git_commit_all = lambda _path, _message: False
+            self.make_active_datastore_skill(datastore, projects_root, "agents-skills", "global-skill")
+            cli.write_state({"version": 1, "datastore": str(datastore), "workspaces": []})
+
+            with redirect_stdout(StringIO()) as stdout:
+                result = cli.command_archive_skill(
+                    SimpleNamespace(
+                        workspace=str(projects_root),
+                        source_kind="agents-skills",
+                        identity="global-skill",
+                        codex_prefix="keld",
+                        no_push=True,
+                    )
+                )
+
+            self.assertEqual(result, 0)
+            self.assertIn("codex mirror status: missing", stdout.getvalue())
+        finally:
+            cli.STATE_PATH, cli.DEFAULT_DATASTORE, cli.PROJECTS_SKILLS, cli.CODEX_SKILLS, cli.git_commit_all = old_paths
+
+    def test_archive_global_skill_honors_custom_codex_prefix(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE, cli.PROJECTS_SKILLS, cli.CODEX_SKILLS, cli.git_commit_all)
+        try:
+            datastore = self.root / "store"
+            projects_root = self.root / "Projects"
+            codex_skills = self.root / "codex-skills"
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = datastore
+            cli.PROJECTS_SKILLS = projects_root / ".agents" / "skills"
+            cli.CODEX_SKILLS = codex_skills
+            cli.git_commit_all = lambda _path, _message: False
+            self.make_active_datastore_skill(datastore, projects_root, "agents-skills", "global-skill")
+            self.make_skill(codex_skills, "team-global-skill")
+            self.make_skill(codex_skills, "keld-global-skill")
+            cli.write_state({"version": 1, "datastore": str(datastore), "workspaces": []})
+
+            with redirect_stdout(StringIO()) as stdout:
+                result = cli.command_archive_skill(
+                    SimpleNamespace(
+                        workspace=str(projects_root),
+                        source_kind="agents-skills",
+                        identity="global-skill",
+                        codex_prefix="team",
+                        no_push=True,
+                    )
+                )
+
+            self.assertEqual(result, 0)
+            self.assertIn("codex mirror status: removed", stdout.getvalue())
+            self.assertFalse((codex_skills / "team-global-skill").exists())
+            self.assertTrue((codex_skills / "keld-global-skill" / "SKILL.md").exists())
+        finally:
+            cli.STATE_PATH, cli.DEFAULT_DATASTORE, cli.PROJECTS_SKILLS, cli.CODEX_SKILLS, cli.git_commit_all = old_paths
+
+    def test_archive_local_workspace_skill_skips_codex_mirror_removal(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE, cli.PROJECTS_SKILLS, cli.CODEX_SKILLS, cli.git_commit_all)
+        try:
+            datastore = self.root / "store"
+            workspace = self.root / "workspace"
+            codex_skills = self.root / "codex-skills"
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = datastore
+            cli.PROJECTS_SKILLS = self.root / "Projects" / ".agents" / "skills"
+            cli.CODEX_SKILLS = codex_skills
+            cli.git_commit_all = lambda _path, _message: False
+            self.make_active_datastore_skill(datastore, workspace, "agents-skills", "local-skill")
+            self.make_skill(codex_skills, "keld-local-skill")
+            cli.write_state({"version": 1, "datastore": str(datastore), "workspaces": []})
+
+            with redirect_stdout(StringIO()) as stdout:
+                result = cli.command_archive_skill(
+                    SimpleNamespace(
+                        workspace=str(workspace),
+                        source_kind="agents-skills",
+                        identity="local-skill",
+                        codex_prefix="keld",
+                        no_push=True,
+                    )
+                )
+
+            self.assertEqual(result, 0)
+            self.assertIn("codex mirror status: skipped", stdout.getvalue())
+            self.assertTrue((codex_skills / "keld-local-skill" / "SKILL.md").exists())
+        finally:
+            cli.STATE_PATH, cli.DEFAULT_DATASTORE, cli.PROJECTS_SKILLS, cli.CODEX_SKILLS, cli.git_commit_all = old_paths
+
+    def test_archive_failure_does_not_remove_codex_mirror(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE, cli.PROJECTS_SKILLS, cli.CODEX_SKILLS)
+        try:
+            datastore = self.root / "store"
+            projects_root = self.root / "Projects"
+            codex_skills = self.root / "codex-skills"
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = datastore
+            cli.PROJECTS_SKILLS = projects_root / ".agents" / "skills"
+            cli.CODEX_SKILLS = codex_skills
+            self.make_skill(codex_skills, "keld-global-skill")
+            cli.write_state({"version": 1, "datastore": str(datastore), "workspaces": []})
+
+            with self.assertRaises(cli.KeeperError):
+                cli.command_archive_skill(
+                    SimpleNamespace(
+                        workspace=str(projects_root),
+                        source_kind="agents-skills",
+                        identity="global-skill",
+                        codex_prefix="keld",
+                        no_push=True,
+                    )
+                )
+
+            self.assertTrue((codex_skills / "keld-global-skill" / "SKILL.md").exists())
+        finally:
+            cli.STATE_PATH, cli.DEFAULT_DATASTORE, cli.PROJECTS_SKILLS, cli.CODEX_SKILLS = old_paths
+
 
 if __name__ == "__main__":
     unittest.main()
