@@ -35,6 +35,7 @@ skillskeeper codex-sync
 skillskeeper library graph rebuild
 skillskeeper library graph status
 skillskeeper checkout skill source-review --workspace /path/to/workspace
+skillskeeper checkout tree research-writer --workspace /path/to/workspace
 skillskeeper datastore init --remote git@github.com:OWNER/PRIVATE-STORE.git
 skillskeeper install --package dist/skillskeeper-1.0.0-py3-none-any.whl
 skillskeeper install --package . --replace-runtime --no-load
@@ -100,6 +101,10 @@ The command records generated ownership and the source hash in:
 ```
 
 Existing active targets with local changes are not overwritten.
+
+`skillskeeper checkout tree <root-id> --workspace <path>` expands a graph root
+and materializes every resolved skill in stable traversal order. The lockfile
+records the selected root and each generated checkout entry.
 
 ## Add / Validate Skills
 

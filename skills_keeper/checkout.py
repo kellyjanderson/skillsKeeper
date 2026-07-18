@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .graph import GraphManifest, GraphManifestError, default_manifest_path, load_manifest, validate_manifest
+from .graph import GraphManifest, GraphManifestError, default_manifest_path, load_manifest, resolve_top_down, validate_manifest
 from .ids import skill_identity
 
 
@@ -54,6 +54,27 @@ class CheckoutResult:
     materialized_path: Path
     lockfile_path: Path
     source_hash: str
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class CheckoutPlanItem:
+    entry: CheckoutEntry
+    source_path: Path
+    target_path: Path
+
+
+@dataclass(frozen=True)
+class CheckoutPlan:
+    root_id: str
+    items: tuple[CheckoutPlanItem, ...]
+
+
+@dataclass(frozen=True)
+class CheckoutTreeResult:
+    root_id: str
+    materialized_paths: tuple[Path, ...]
+    lockfile_path: Path
     warnings: tuple[str, ...] = ()
 
 
@@ -172,6 +193,56 @@ def checkout_skill(workspace: Path, skill_id: str, datastore: Path) -> CheckoutR
     )
 
 
+def checkout_tree(workspace: Path, root_id: str, datastore: Path) -> CheckoutTreeResult:
+    manifest = _load_valid_manifest(datastore)
+    plan = plan_checkout_tree(workspace, datastore, manifest, root_id)
+    _preflight_plan(plan)
+    materialized_paths: list[Path] = []
+    created_paths: list[Path] = []
+    try:
+        for item in plan.items:
+            existed = item.target_path.exists()
+            materialized = materialize_skill(item.source_path, item.target_path)
+            materialized_paths.append(materialized)
+            if not existed:
+                created_paths.append(materialized)
+        lockfile = load_lockfile(workspace)
+        write_lockfile(workspace, record_checkout_entries(lockfile, tuple(item.entry for item in plan.items)))
+    except Exception:
+        for path in reversed(created_paths):
+            if path.exists():
+                shutil.rmtree(path)
+        raise
+    return CheckoutTreeResult(
+        root_id=plan.root_id,
+        materialized_paths=tuple(materialized_paths),
+        lockfile_path=lockfile_path(workspace),
+    )
+
+
+def plan_checkout_tree(workspace: Path, datastore: Path, manifest: GraphManifest, root_id: str) -> CheckoutPlan:
+    try:
+        traversal = resolve_top_down(manifest, root_id)
+    except GraphManifestError as error:
+        raise CheckoutLockfileError(str(error)) from error
+    items: list[CheckoutPlanItem] = []
+    for path in traversal.paths:
+        source_path = library_skill_source_path(datastore, manifest, path.skill_id)
+        source_hash = hash_skill_source(source_path)
+        target_path = workspace / ACTIVE_SKILLS_RELATIVE_PATH / path.skill_id
+        graph_path = _traversal_graph_path(path.edges, path.skill_id)
+        entry = CheckoutEntry(
+            skill_id=path.skill_id,
+            source_hash=source_hash,
+            graph_path=graph_path,
+            materialized_path=target_path.relative_to(workspace).as_posix(),
+            ownership_class="library",
+            selected_by=(traversal.root_id,),
+        )
+        items.append(CheckoutPlanItem(entry, source_path, target_path))
+    return CheckoutPlan(traversal.root_id, tuple(items))
+
+
 def materialize_skill(source: Path, target: Path) -> Path:
     if not source.is_dir():
         raise CheckoutLockfileError(f"library skill source is not a directory: {source}")
@@ -189,24 +260,31 @@ def materialize_skill(source: Path, target: Path) -> Path:
 
 
 def record_checkout_entry(lockfile: CheckoutLockfile, entry: CheckoutEntry) -> CheckoutLockfile:
-    normalized_entry = normalize_entry(entry)
-    entries = [
+    return record_checkout_entries(lockfile, (entry,))
+
+
+def record_checkout_entries(lockfile: CheckoutLockfile, entries: tuple[CheckoutEntry, ...]) -> CheckoutLockfile:
+    normalized_entries = tuple(normalize_entry(entry) for entry in entries)
+    replaced_skill_ids = {entry.skill_id for entry in normalized_entries}
+    replaced_paths = {entry.materialized_path for entry in normalized_entries}
+    next_entries = [
         existing
         for existing in lockfile.entries
-        if existing.skill_id != normalized_entry.skill_id
-        and existing.materialized_path != normalized_entry.materialized_path
+        if existing.skill_id not in replaced_skill_ids
+        and existing.materialized_path not in replaced_paths
     ]
-    entries.append(normalized_entry)
-    roots = tuple({*lockfile.roots, *normalized_entry.selected_by})
+    next_entries.extend(normalized_entries)
+    roots = set(lockfile.roots)
+    for entry in normalized_entries:
+        roots.update(entry.selected_by)
     return normalize_lockfile(
         CheckoutLockfile(
             workspace=lockfile.workspace,
             schema_version=lockfile.schema_version,
-            roots=roots,
-            entries=tuple(entries),
+            roots=tuple(roots),
+            entries=tuple(next_entries),
         )
     )
-
 
 def normalize_lockfile(lockfile: CheckoutLockfile, workspace: Path | None = None) -> CheckoutLockfile:
     return CheckoutLockfile(
@@ -336,6 +414,27 @@ def _hashable_files(path: Path) -> list[Path]:
 
 def _copy_ignore(_directory: str, names: list[str]) -> set[str]:
     return {name for name in names if name in HASH_SKIP_NAMES}
+
+
+def _preflight_plan(plan: CheckoutPlan) -> None:
+    for item in plan.items:
+        if not item.source_path.is_dir():
+            raise CheckoutLockfileError(f"library skill source is not a directory: {item.source_path}")
+        if not (item.source_path / "SKILL.md").is_file():
+            raise CheckoutLockfileError(f"library skill source is missing SKILL.md: {item.source_path}")
+        if item.target_path.exists():
+            if not item.target_path.is_dir():
+                raise CheckoutLockfileError(f"checkout target exists and is not a directory: {item.target_path}")
+            if hash_skill_source(item.target_path) != item.entry.source_hash:
+                raise CheckoutLockfileError(f"checkout target has local changes: {item.target_path}")
+
+
+def _traversal_graph_path(edges: tuple[Any, ...], skill_id: str) -> tuple[str, ...]:
+    if not edges:
+        return (skill_id,)
+    path = [edges[0].source]
+    path.extend(edge.target for edge in edges)
+    return tuple(path)
 
 
 def _is_source_hash(value: str) -> bool:

@@ -15,6 +15,6 @@ child test specifications for implementation verification.
 
 - `project/specs/2.0.0p/tests/checkout-lockfile-schema.test-spec.md`
 - `project/specs/2.0.0p/tests/implemented/checkout-skill-materialization.test-spec.md`
-- `project/specs/2.0.0p/tests/checkout-tree-materialization.test-spec.md`
+- `project/specs/2.0.0p/tests/implemented/checkout-tree-materialization.test-spec.md`
 - `project/specs/2.0.0p/tests/checkout-status.test-spec.md`
 - `project/specs/2.0.0p/tests/checkout-update.test-spec.md`

@@ -43,6 +43,30 @@ class CheckoutLockfileTest(unittest.TestCase):
         )
         return path
 
+    def write_tree_graph_manifest(self, datastore: Path) -> Path:
+        path = graph.default_manifest_path(datastore)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "nodes": [
+                        {"id": "Research Writer", "type": "profession"},
+                        {"id": "core-index", "type": "index"},
+                        {"id": "alpha", "type": "skill", "source": "skills/alpha"},
+                        {"id": "beta", "type": "skill", "source": "skills/beta"},
+                    ],
+                    "edges": [
+                        {"source": "Research Writer", "target": "core-index", "relationship": "includes"},
+                        {"source": "core-index", "target": "alpha", "relationship": "requires"},
+                        {"source": "core-index", "target": "beta", "relationship": "recommends"},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
+
     def entry(self, materialized_path: str = ".agents/skills/source-review") -> checkout.CheckoutEntry:
         return checkout.CheckoutEntry(
             skill_id="source-review",
@@ -240,6 +264,50 @@ class CheckoutLockfileTest(unittest.TestCase):
             self.assertFalse((workspace / ".agents" / "skills" / "source-review").exists())
         finally:
             cli.STATE_PATH, cli.DEFAULT_DATASTORE = old_paths
+
+    def test_checkout_tree_cli_materializes_resolved_skills_in_stable_order(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE)
+        try:
+            datastore = self.root / "store"
+            workspace = self.root / "workspace"
+            self.make_skill_at(datastore / "skills-library" / "skills", "alpha")
+            self.make_skill_at(datastore / "skills-library" / "skills", "beta")
+            self.write_tree_graph_manifest(datastore)
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = datastore
+            cli.write_state({"version": 1, "datastore": str(datastore), "workspaces": []})
+
+            with redirect_stdout(StringIO()) as stdout:
+                result = cli.main(["checkout", "tree", "Research Writer", "--workspace", str(workspace)])
+
+            self.assertEqual(result, 0)
+            output = stdout.getvalue()
+            self.assertIn("root: Research-Writer", output)
+            self.assertIn("skills: 2", output)
+            alpha_output = "materialized: " + str((workspace / ".agents" / "skills" / "alpha").resolve())
+            beta_output = "materialized: " + str((workspace / ".agents" / "skills" / "beta").resolve())
+            self.assertLess(output.index(alpha_output), output.index(beta_output))
+            self.assertTrue((workspace / ".agents" / "skills" / "alpha" / "SKILL.md").exists())
+            self.assertTrue((workspace / ".agents" / "skills" / "beta" / "SKILL.md").exists())
+            lockfile = checkout.load_lockfile(workspace)
+            self.assertEqual(lockfile.roots, ("Research-Writer",))
+            self.assertEqual([entry.skill_id for entry in lockfile.entries], ["alpha", "beta"])
+            self.assertEqual(lockfile.entries[0].graph_path, ("Research-Writer", "core-index", "alpha"))
+            self.assertEqual(lockfile.entries[1].selected_by, ("Research-Writer",))
+        finally:
+            cli.STATE_PATH, cli.DEFAULT_DATASTORE = old_paths
+
+    def test_checkout_tree_missing_later_source_does_not_leave_partial_copy(self) -> None:
+        datastore = self.root / "store"
+        workspace = self.root / "workspace"
+        self.make_skill_at(datastore / "skills-library" / "skills", "alpha")
+        self.write_tree_graph_manifest(datastore)
+
+        with self.assertRaisesRegex(checkout.CheckoutLockfileError, "skill source is not a directory"):
+            checkout.checkout_tree(workspace, "Research Writer", datastore)
+
+        self.assertFalse((workspace / ".agents" / "skills" / "alpha").exists())
+        self.assertFalse(checkout.lockfile_path(workspace).exists())
 
 
 if __name__ == "__main__":

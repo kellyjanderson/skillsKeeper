@@ -82,9 +82,9 @@ User/caller surface: graph traversal APIs consumed by checkout and proposal modu
 
 - [x] Implement helper/service behavior for graph traversal APIs.
 - [ ] Wire traversal into checkout and proposal consumer modules.
-  - Status: Missing prerequisite - single-skill checkout now validates graph skill metadata; traversal consumer proof still awaits `project/specs/2.0.0p/checkout-tree-materialization.spec.md` and `project/specs/2.0.0p/proposal-review-impact.spec.md`.
+  - Status: Missing prerequisite - `checkout tree` now consumes top-down traversal; proposal impact traversal still awaits `project/specs/2.0.0p/proposal-review-impact.spec.md`.
 - [ ] Validate traversal through graph unit tests and consuming checkout/proposal route tests.
-  - Status: Missing prerequisite - graph unit tests pass; checkout tree and proposal consumer route tests are still pending.
+  - Status: Missing prerequisite - graph unit tests and checkout tree route tests pass; proposal consumer route tests are still pending.
 - [ ] Update docs/progression/status after route validation.
 
 ### Graph Cache CLI
@@ -112,7 +112,7 @@ User/caller surface: lockfile consumed by `checkout status`, `checkout update`, 
 
 - [x] Implement helper/service behavior for checkout lockfile schema.
 - [ ] Wire lockfile helpers into checkout and reconciliation consumer modules.
-  - Status: Missing prerequisite - `checkout skill` now writes lockfile entries; checkout status/update and sync/watch reconciliation consumers still await `project/specs/2.0.0p/checkout-status.spec.md`; `project/specs/2.0.0p/checkout-update.spec.md`; `project/specs/2.0.0p/active-surface-sync-watch-route.spec.md`.
+  - Status: Missing prerequisite - `checkout skill` and `checkout tree` now write lockfile entries; checkout status/update and sync/watch reconciliation consumers still await `project/specs/2.0.0p/checkout-status.spec.md`; `project/specs/2.0.0p/checkout-update.spec.md`; `project/specs/2.0.0p/active-surface-sync-watch-route.spec.md`.
 - [x] Validate lockfile round-trip through route-level temporary fixture tests.
 - [ ] Update docs/progression/status after route validation.
 
@@ -131,16 +131,16 @@ User/caller surface: `skillskeeper checkout skill <skill-id> --workspace <path>`
 
 ### Checkout Tree Materialization
 
-Spec: `project/specs/2.0.0p/checkout-tree-materialization.spec.md`
-Test spec: `project/specs/2.0.0p/tests/checkout-tree-materialization.test-spec.md`
+Spec: `project/specs/2.0.0p/implemented/checkout-tree-materialization.spec.md`
+Test spec: `project/specs/2.0.0p/tests/implemented/checkout-tree-materialization.test-spec.md`
 Prerequisites: `project/specs/2.0.0p/checkout-lockfile-schema.spec.md`; `project/specs/2.0.0p/graph-traversal-api.spec.md`
 App type: console
 User/caller surface: `skillskeeper checkout tree <root-id> --workspace <path>`
 
-- [ ] Implement helper/service behavior for tree checkout materialization.
-- [ ] Wire behavior into the `checkout tree` console route.
-- [ ] Validate integrated checkout tree route through temporary datastore/workspace fixtures.
-- [ ] Update docs/progression/status after route validation.
+- [x] Implement helper/service behavior for tree checkout materialization.
+- [x] Wire behavior into the `checkout tree` console route.
+- [x] Validate integrated checkout tree route through temporary datastore/workspace fixtures.
+- [x] Update docs/progression/status after route validation.
 
 ### Checkout Status
 
