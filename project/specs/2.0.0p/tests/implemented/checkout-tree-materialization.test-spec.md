@@ -1,9 +1,9 @@
 # Checkout Tree Materialization Test Specification
 
 Date: 2026-07-17
-Status: Reviewed Draft
-Feature spec: `project/specs/2.0.0p/checkout-tree-materialization.spec.md`
-Feature spec canonical status: Canonical draft leaf
+Status: Implemented
+Feature spec: `project/specs/2.0.0p/implemented/checkout-tree-materialization.spec.md`
+Feature spec canonical status: Implemented canonical leaf
 Architecture ancestor: `project/architecture/project-checkouts-and-active-surface.md; project/architecture/acd-2.0-implementation-defaults.md`
 
 ## Overview
