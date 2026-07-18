@@ -8,7 +8,7 @@ from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
-from skills_keeper import cli
+from skills_keeper import cli, graph
 
 
 class SkillsKeeperTest(unittest.TestCase):
@@ -798,7 +798,7 @@ class SkillsKeeperTest(unittest.TestCase):
             ],
         }
 
-    def test_library_graph_rebuild_cli_reports_manifest_hash_without_cache_write(self) -> None:
+    def test_library_graph_rebuild_cli_writes_cache_metadata(self) -> None:
         old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE)
         try:
             datastore = self.root / "store"
@@ -815,21 +815,31 @@ class SkillsKeeperTest(unittest.TestCase):
             self.assertIn("nodes: 2", output)
             self.assertIn("edges: 1", output)
             self.assertIn("manifest hash:", output)
-            self.assertIn("cache written: false", output)
-            self.assertFalse((datastore / "skills-library" / "graph" / "index.kuzu").exists())
+            self.assertIn("status: rebuilt", output)
+            self.assertIn("cache written: true", output)
+            metadata_path = graph.default_cache_metadata_path(datastore)
+            self.assertTrue(metadata_path.exists())
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            self.assertIn("generated_at", metadata)
+            self.assertEqual(metadata["schema_version"], 1)
         finally:
             cli.STATE_PATH, cli.DEFAULT_DATASTORE = old_paths
 
-    def test_library_graph_rebuild_cli_reports_validation_errors(self) -> None:
+    def test_library_graph_rebuild_cli_reports_validation_errors_without_rewriting_cache(self) -> None:
         old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE)
         try:
             datastore = self.root / "store"
-            payload = self.valid_graph_payload()
-            payload["edges"] = [{"source": "Research Writer", "target": "missing", "relationship": "includes"}]
             cli.STATE_PATH = self.root / "state.json"
             cli.DEFAULT_DATASTORE = datastore
-            self.write_graph_manifest(datastore, payload)
             cli.write_state({"version": 1, "datastore": str(datastore), "workspaces": []})
+            self.write_graph_manifest(datastore, self.valid_graph_payload())
+            with redirect_stdout(StringIO()):
+                self.assertEqual(cli.main(["library", "graph", "rebuild"]), 0)
+            metadata_path = graph.default_cache_metadata_path(datastore)
+            before = metadata_path.read_text(encoding="utf-8")
+            payload = self.valid_graph_payload()
+            payload["edges"] = [{"source": "Research Writer", "target": "missing", "relationship": "includes"}]
+            self.write_graph_manifest(datastore, payload)
 
             with redirect_stderr(StringIO()) as stderr:
                 result = cli.main(["library", "graph", "rebuild"])
@@ -837,11 +847,33 @@ class SkillsKeeperTest(unittest.TestCase):
             self.assertEqual(result, 1)
             self.assertIn("graph manifest validation failed", stderr.getvalue())
             self.assertIn("unknown target node 'missing'", stderr.getvalue())
-            self.assertFalse((datastore / "skills-library" / "graph" / "index.kuzu").exists())
+            self.assertEqual(metadata_path.read_text(encoding="utf-8"), before)
         finally:
             cli.STATE_PATH, cli.DEFAULT_DATASTORE = old_paths
 
-    def test_library_graph_status_cli_reports_valid_manifest(self) -> None:
+    def test_library_graph_status_cli_reports_fresh_cache(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE)
+        try:
+            datastore = self.root / "store"
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = datastore
+            self.write_graph_manifest(datastore, self.valid_graph_payload())
+            cli.write_state({"version": 1, "datastore": str(datastore), "workspaces": []})
+            with redirect_stdout(StringIO()):
+                self.assertEqual(cli.main(["library", "graph", "rebuild"]), 0)
+
+            with redirect_stdout(StringIO()) as stdout:
+                result = cli.main(["library", "graph", "status"])
+
+            self.assertEqual(result, 0)
+            output = stdout.getvalue()
+            self.assertIn("status: fresh", output)
+            self.assertIn("manifest hash:", output)
+            self.assertIn("cached manifest hash:", output)
+        finally:
+            cli.STATE_PATH, cli.DEFAULT_DATASTORE = old_paths
+
+    def test_library_graph_status_cli_reports_missing_cache(self) -> None:
         old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE)
         try:
             datastore = self.root / "store"
@@ -853,9 +885,36 @@ class SkillsKeeperTest(unittest.TestCase):
             with redirect_stdout(StringIO()) as stdout:
                 result = cli.main(["library", "graph", "status"])
 
-            self.assertEqual(result, 0)
-            self.assertIn("status: valid", stdout.getvalue())
-            self.assertIn("manifest hash:", stdout.getvalue())
+            self.assertEqual(result, 1)
+            self.assertIn("status: missing", stdout.getvalue())
+            self.assertIn("message: cache metadata is missing", stdout.getvalue())
+        finally:
+            cli.STATE_PATH, cli.DEFAULT_DATASTORE = old_paths
+
+    def test_library_graph_status_cli_reports_stale_cache(self) -> None:
+        old_paths = (cli.STATE_PATH, cli.DEFAULT_DATASTORE)
+        try:
+            datastore = self.root / "store"
+            cli.STATE_PATH = self.root / "state.json"
+            cli.DEFAULT_DATASTORE = datastore
+            self.write_graph_manifest(datastore, self.valid_graph_payload())
+            cli.write_state({"version": 1, "datastore": str(datastore), "workspaces": []})
+            with redirect_stdout(StringIO()):
+                self.assertEqual(cli.main(["library", "graph", "rebuild"]), 0)
+            payload = self.valid_graph_payload()
+            payload["nodes"] = [
+                {"id": "Research Writer", "type": "profession", "label": "Changed"},
+                {"id": "source-review", "type": "skill"},
+            ]
+            self.write_graph_manifest(datastore, payload)
+
+            with redirect_stdout(StringIO()) as stdout:
+                result = cli.main(["library", "graph", "status"])
+
+            self.assertEqual(result, 1)
+            output = stdout.getvalue()
+            self.assertIn("status: stale", output)
+            self.assertIn("cached manifest hash:", output)
         finally:
             cli.STATE_PATH, cli.DEFAULT_DATASTORE = old_paths
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,8 @@ from .ids import skill_identity
 
 GRAPH_ROOT = Path("skills-library") / "graph"
 GRAPH_MANIFEST_FILENAME = "skill-graph.json"
+GRAPH_CACHE_DIRNAME = "index.kuzu"
+CACHE_METADATA_FILENAME = "cache-metadata.json"
 NODE_TYPES = {"skill", "index", "profession", "context", "phase", "standard"}
 EDGE_TYPES = {"includes", "requires", "recommends", "extends", "conflicts", "replaces"}
 ACYCLIC_EDGE_TYPES = {"includes", "requires", "extends", "replaces"}
@@ -70,8 +73,34 @@ class TraversalResult:
     errors: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class CacheMetadata:
+    manifest_path: str
+    manifest_hash: str
+    schema_version: int
+    generated_at: str
+
+
+@dataclass(frozen=True)
+class CacheStatus:
+    status: str
+    manifest_path: Path
+    metadata_path: Path
+    message: str
+    manifest_hash: str | None = None
+    cached_manifest_hash: str | None = None
+    schema_version: int | None = None
+    cached_schema_version: int | None = None
+    nodes: int | None = None
+    edges: int | None = None
+
+
 def default_manifest_path(datastore: Path) -> Path:
     return datastore / GRAPH_ROOT / GRAPH_MANIFEST_FILENAME
+
+
+def default_cache_metadata_path(datastore: Path) -> Path:
+    return datastore / GRAPH_ROOT / GRAPH_CACHE_DIRNAME / CACHE_METADATA_FILENAME
 
 
 def load_manifest(path: Path) -> GraphManifest:
@@ -92,8 +121,12 @@ def load_manifest(path: Path) -> GraphManifest:
         raise GraphManifestError("nodes must be a list")
     if not isinstance(edges, list):
         raise GraphManifestError("edges must be a list")
+    try:
+        schema_version = int(version)
+    except (TypeError, ValueError) as error:
+        raise GraphManifestError("schema_version must be an integer") from error
     return GraphManifest(
-        schema_version=int(version),
+        schema_version=schema_version,
         nodes=tuple(_node_from_raw(item, index) for index, item in enumerate(nodes)),
         edges=tuple(_edge_from_raw(item, index) for index, item in enumerate(edges)),
     )
@@ -191,6 +224,114 @@ def manifest_to_dict(manifest: GraphManifest) -> dict[str, Any]:
             }
             for edge in manifest.edges
         ],
+    }
+
+
+def write_cache_metadata(datastore: Path, manifest: GraphManifest, manifest_path: Path | None = None) -> CacheMetadata:
+    errors = validate_manifest(manifest)
+    if errors:
+        detail = "; ".join(error.format() for error in errors)
+        raise GraphManifestError(f"graph manifest validation failed: {detail}")
+    normalized = normalize_manifest(manifest)
+    metadata = CacheMetadata(
+        manifest_path=str((manifest_path or default_manifest_path(datastore)).resolve()),
+        manifest_hash=manifest_hash(normalized),
+        schema_version=normalized.schema_version,
+        generated_at=datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    )
+    path = default_cache_metadata_path(datastore)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(cache_metadata_to_dict(metadata), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
+    return metadata
+
+
+def read_cache_metadata(datastore: Path) -> CacheMetadata | None:
+    path = default_cache_metadata_path(datastore)
+    if not path.exists():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise GraphManifestError(f"cache metadata is not valid JSON: {error}") from error
+    except OSError as error:
+        raise GraphManifestError(f"failed to read cache metadata: {error}") from error
+    if not isinstance(raw, dict):
+        raise GraphManifestError("cache metadata root must be an object")
+    return _cache_metadata_from_raw(raw)
+
+
+def graph_cache_status(datastore: Path) -> CacheStatus:
+    manifest_path = default_manifest_path(datastore)
+    metadata_path = default_cache_metadata_path(datastore)
+    try:
+        manifest = load_manifest(manifest_path)
+        errors = validate_manifest(manifest)
+        if errors:
+            detail = "; ".join(error.format() for error in errors)
+            raise GraphManifestError(f"graph manifest validation failed: {detail}")
+        normalized = normalize_manifest(manifest)
+        current_hash = manifest_hash(normalized)
+    except GraphManifestError as error:
+        return CacheStatus("invalid", manifest_path, metadata_path, str(error))
+    try:
+        metadata = read_cache_metadata(datastore)
+    except GraphManifestError as error:
+        return CacheStatus(
+            "invalid",
+            manifest_path,
+            metadata_path,
+            str(error),
+            manifest_hash=current_hash,
+            schema_version=normalized.schema_version,
+            nodes=len(normalized.nodes),
+            edges=len(normalized.edges),
+        )
+    if metadata is None:
+        return CacheStatus(
+            "missing",
+            manifest_path,
+            metadata_path,
+            "cache metadata is missing",
+            manifest_hash=current_hash,
+            schema_version=normalized.schema_version,
+            nodes=len(normalized.nodes),
+            edges=len(normalized.edges),
+        )
+    if metadata.manifest_hash != current_hash or metadata.schema_version != normalized.schema_version:
+        return CacheStatus(
+            "stale",
+            manifest_path,
+            metadata_path,
+            "cache metadata does not match manifest hash or schema version",
+            manifest_hash=current_hash,
+            cached_manifest_hash=metadata.manifest_hash,
+            schema_version=normalized.schema_version,
+            cached_schema_version=metadata.schema_version,
+            nodes=len(normalized.nodes),
+            edges=len(normalized.edges),
+        )
+    return CacheStatus(
+        "fresh",
+        manifest_path,
+        metadata_path,
+        "cache metadata matches manifest",
+        manifest_hash=current_hash,
+        cached_manifest_hash=metadata.manifest_hash,
+        schema_version=normalized.schema_version,
+        cached_schema_version=metadata.schema_version,
+        nodes=len(normalized.nodes),
+        edges=len(normalized.edges),
+    )
+
+
+def cache_metadata_to_dict(metadata: CacheMetadata) -> dict[str, Any]:
+    return {
+        "generated_at": metadata.generated_at,
+        "manifest_hash": metadata.manifest_hash,
+        "manifest_path": metadata.manifest_path,
+        "schema_version": metadata.schema_version,
     }
 
 
@@ -312,6 +453,23 @@ def _edge_from_raw(item: Any, index: int) -> GraphEdge:
     relationship = item.get("relationship", item.get("type", ""))
     metadata = {key: value for key, value in item.items() if key not in {"source", "target", "relationship", "type"}}
     return GraphEdge(str(item.get("source", "")), str(item.get("target", "")), str(relationship), metadata)
+
+
+def _cache_metadata_from_raw(raw: dict[str, Any]) -> CacheMetadata:
+    required = ("manifest_path", "manifest_hash", "schema_version", "generated_at")
+    missing = [key for key in required if key not in raw]
+    if missing:
+        raise GraphManifestError(f"cache metadata missing required field(s): {', '.join(missing)}")
+    try:
+        schema_version = int(raw["schema_version"])
+    except (TypeError, ValueError) as error:
+        raise GraphManifestError("cache metadata schema_version must be an integer") from error
+    return CacheMetadata(
+        manifest_path=str(raw["manifest_path"]),
+        manifest_hash=str(raw["manifest_hash"]),
+        schema_version=schema_version,
+        generated_at=str(raw["generated_at"]),
+    )
 
 
 def _valid_normalized_manifest(manifest: GraphManifest) -> GraphManifest:

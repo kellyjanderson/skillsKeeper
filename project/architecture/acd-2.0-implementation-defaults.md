@@ -109,7 +109,7 @@ policy, overlay scope, and storage placement.
 - Canonical child specs:
   - `project/specs/2.0.0p/implemented/graph-manifest-schema-validation.spec.md` - graph source defaults.
   - `project/specs/2.0.0p/graph-traversal-api.spec.md` - graph traversal defaults.
-  - `project/specs/2.0.0p/graph-cache-cli.spec.md` - generated cache defaults.
+  - `project/specs/2.0.0p/implemented/graph-cache-cli.spec.md` - generated cache defaults.
   - `project/specs/2.0.0p/checkout-lockfile-schema.spec.md` - lockfile defaults.
   - `project/specs/2.0.0p/checkout-skill-materialization.spec.md` - pinned checkout defaults.
   - `project/specs/2.0.0p/checkout-tree-materialization.spec.md` - pinned tree checkout defaults.
