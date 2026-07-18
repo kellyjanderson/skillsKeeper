@@ -66,12 +66,17 @@ Generated runtime state files are skipped. Each sync commits changes to the data
 ## Skill Library Graph
 
 `skillskeeper library graph rebuild` validates the datastore graph manifest and
-prints its schema version, node count, edge count, and stable manifest hash. In
-2.0.0 work so far this command validates without writing generated cache files;
-cache metadata writes are planned separately.
+prints its schema version, node count, edge count, stable manifest hash, and
+cache metadata path. A successful rebuild writes generated cache metadata under
+the datastore graph cache directory:
 
-`skillskeeper library graph status` reports whether the graph manifest is valid
-and prints the same normalized manifest summary. The default manifest path is:
+```text
+<datastore>/skills-library/graph/index.kuzu/cache-metadata.json
+```
+
+`skillskeeper library graph status` reports `fresh`, `stale`, `missing`, or
+`invalid` by comparing cache metadata against the current manifest hash and
+schema version. The default manifest path is:
 
 ```text
 <datastore>/skills-library/graph/skill-graph.json

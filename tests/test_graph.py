@@ -19,6 +19,12 @@ class GraphManifestTest(unittest.TestCase):
         path.write_text(json.dumps(payload), encoding="utf-8")
         return path
 
+    def write_datastore_manifest(self, datastore: Path, payload: dict[str, object]) -> Path:
+        path = graph.default_manifest_path(datastore)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
     def valid_payload(self) -> dict[str, object]:
         return {
             "schema_version": 1,
@@ -82,6 +88,13 @@ class GraphManifestTest(unittest.TestCase):
         errors = graph.validate_manifest(manifest)
 
         self.assertIn("unknown relationship 'owns'", "; ".join(error.format() for error in errors))
+
+    def test_load_manifest_rejects_non_integer_schema_version(self) -> None:
+        payload = self.valid_payload()
+        payload["schema_version"] = "abc"
+
+        with self.assertRaisesRegex(graph.GraphManifestError, "schema_version must be an integer"):
+            graph.load_manifest(self.write_manifest(payload))
 
     def test_cycle_validation_terminates_with_clear_error(self) -> None:
         payload = {
@@ -160,6 +173,58 @@ class GraphManifestTest(unittest.TestCase):
         manifest = graph.load_manifest(self.write_manifest(payload))
 
         self.assertEqual(graph.detect_traversal_cycle(manifest, "alpha"), ["alpha -> beta -> alpha"])
+
+    def test_cache_status_is_fresh_after_metadata_write(self) -> None:
+        datastore = self.root / "store"
+        manifest_path = self.write_datastore_manifest(datastore, self.valid_payload())
+        manifest = graph.load_manifest(manifest_path)
+
+        metadata = graph.write_cache_metadata(datastore, manifest, manifest_path=manifest_path)
+        status = graph.graph_cache_status(datastore)
+
+        self.assertTrue(graph.default_cache_metadata_path(datastore).exists())
+        self.assertEqual(status.status, "fresh")
+        self.assertEqual(status.manifest_hash, metadata.manifest_hash)
+        self.assertEqual(status.cached_manifest_hash, metadata.manifest_hash)
+
+    def test_cache_status_is_missing_without_metadata(self) -> None:
+        datastore = self.root / "store"
+        self.write_datastore_manifest(datastore, self.valid_payload())
+
+        status = graph.graph_cache_status(datastore)
+
+        self.assertEqual(status.status, "missing")
+        self.assertIn("missing", status.message)
+        self.assertIsNotNone(status.manifest_hash)
+
+    def test_cache_status_is_stale_when_manifest_hash_changes(self) -> None:
+        datastore = self.root / "store"
+        manifest_path = self.write_datastore_manifest(datastore, self.valid_payload())
+        graph.write_cache_metadata(datastore, graph.load_manifest(manifest_path), manifest_path=manifest_path)
+        changed = self.valid_payload()
+        changed["nodes"] = [
+            {"id": "Research Writer", "type": "profession", "label": "Changed"},
+            {"id": "source-review", "type": "skill"},
+        ]
+        self.write_datastore_manifest(datastore, changed)
+
+        status = graph.graph_cache_status(datastore)
+
+        self.assertEqual(status.status, "stale")
+        self.assertIsNotNone(status.cached_manifest_hash)
+        self.assertNotEqual(status.manifest_hash, status.cached_manifest_hash)
+
+    def test_cache_status_is_invalid_when_metadata_is_invalid(self) -> None:
+        datastore = self.root / "store"
+        self.write_datastore_manifest(datastore, self.valid_payload())
+        metadata_path = graph.default_cache_metadata_path(datastore)
+        metadata_path.parent.mkdir(parents=True)
+        metadata_path.write_text("{", encoding="utf-8")
+
+        status = graph.graph_cache_status(datastore)
+
+        self.assertEqual(status.status, "invalid")
+        self.assertIn("cache metadata is not valid JSON", status.message)
 
 
 if __name__ == "__main__":

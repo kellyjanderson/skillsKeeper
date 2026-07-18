@@ -13,7 +13,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Literal
 
-from .graph import GraphManifestError, default_manifest_path, load_manifest, manifest_hash, normalize_manifest, validate_manifest
+from .graph import (
+    GraphManifestError,
+    default_cache_metadata_path,
+    default_manifest_path,
+    graph_cache_status,
+    load_manifest,
+    normalize_manifest,
+    validate_manifest,
+    write_cache_metadata,
+)
 from .ids import skill_identity, slug
 
 
@@ -767,25 +776,38 @@ def load_valid_graph_manifest_for_command(command: str) -> tuple[Path, Any]:
 def command_library_graph_rebuild(_args: argparse.Namespace) -> int:
     manifest_path, manifest = load_valid_graph_manifest_for_command("library graph rebuild")
     normalized = normalize_manifest(manifest)
+    datastore = datastore_path(read_state())
+    metadata = write_cache_metadata(datastore, normalized, manifest_path=manifest_path)
     print(f"manifest: {manifest_path}")
+    print(f"cache metadata: {default_cache_metadata_path(datastore)}")
+    print("status: rebuilt")
     print(f"schema version: {normalized.schema_version}")
     print(f"nodes: {len(normalized.nodes)}")
     print(f"edges: {len(normalized.edges)}")
-    print(f"manifest hash: {manifest_hash(normalized)}")
-    print("cache written: false")
+    print(f"manifest hash: {metadata.manifest_hash}")
+    print("cache written: true")
     return 0
 
 
 def command_library_graph_status(_args: argparse.Namespace) -> int:
-    manifest_path, manifest = load_valid_graph_manifest_for_command("library graph status")
-    normalized = normalize_manifest(manifest)
-    print(f"manifest: {manifest_path}")
-    print("status: valid")
-    print(f"schema version: {normalized.schema_version}")
-    print(f"nodes: {len(normalized.nodes)}")
-    print(f"edges: {len(normalized.edges)}")
-    print(f"manifest hash: {manifest_hash(normalized)}")
-    return 0
+    status = graph_cache_status(datastore_path(read_state()))
+    print(f"manifest: {status.manifest_path}")
+    print(f"cache metadata: {status.metadata_path}")
+    print(f"status: {status.status}")
+    if status.schema_version is not None:
+        print(f"schema version: {status.schema_version}")
+    if status.nodes is not None:
+        print(f"nodes: {status.nodes}")
+    if status.edges is not None:
+        print(f"edges: {status.edges}")
+    if status.manifest_hash is not None:
+        print(f"manifest hash: {status.manifest_hash}")
+    if status.cached_manifest_hash is not None:
+        print(f"cached manifest hash: {status.cached_manifest_hash}")
+    if status.cached_schema_version is not None:
+        print(f"cached schema version: {status.cached_schema_version}")
+    print(f"message: {status.message}")
+    return 0 if status.status == "fresh" else 1
 
 
 def command_skill_flag(args: argparse.Namespace) -> int:

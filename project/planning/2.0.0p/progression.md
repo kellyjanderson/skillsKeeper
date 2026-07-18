@@ -89,16 +89,16 @@ User/caller surface: graph traversal APIs consumed by checkout and proposal modu
 
 ### Graph Cache CLI
 
-Spec: `project/specs/2.0.0p/graph-cache-cli.spec.md`
-Test spec: `project/specs/2.0.0p/tests/graph-cache-cli.test-spec.md`
+Spec: `project/specs/2.0.0p/implemented/graph-cache-cli.spec.md`
+Test spec: `project/specs/2.0.0p/tests/implemented/graph-cache-cli.test-spec.md`
 Prerequisites: `project/specs/2.0.0p/implemented/graph-manifest-schema-validation.spec.md`
 App type: console
 User/caller surface: `skillskeeper library graph rebuild`; `skillskeeper library graph status`
 
-- [ ] Implement helper/service behavior for graph cache rebuild/status.
-- [ ] Wire behavior into the `library graph rebuild` and `library graph status` console routes.
-- [ ] Validate integrated graph cache routes through temporary datastore fixtures.
-- [ ] Update docs/progression/status after route validation.
+- [x] Implement helper/service behavior for graph cache rebuild/status.
+- [x] Wire behavior into the `library graph rebuild` and `library graph status` console routes.
+- [x] Validate integrated graph cache routes through temporary datastore fixtures.
+- [x] Update docs/progression/status after route validation.
 
 ## Lane: Checkout Foundation
 
